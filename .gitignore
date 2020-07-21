@@ -1,0 +1,21 @@
+# GIT IGNORE
+ 
+# Misc
+experimental_notebooks/
+.DS_store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Jupyter notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# PyPI
+build/*
+dist/*
+*.egg-info/*
+
+# Conda
+conda-build/*

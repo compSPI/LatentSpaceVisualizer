@@ -1,0 +1,21 @@
+package:
+  name: latent-space-visualizer
+  version: 0.0.1
+
+source:
+  path: .
+
+requirements:
+  build:
+    - python
+    - setuptools
+
+  run:
+    - python
+    - numpy
+    - scikit-learn
+    - h5py
+    - bokeh
+
+about:
+  home: https://github.com/compSPI/LatentSpaceVisualizer
