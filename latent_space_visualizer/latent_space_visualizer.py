@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 
 from bokeh import events
@@ -226,18 +228,18 @@ def gnp2im(image_np, bit_depth_scale_factor):
 def to_base64(png):
     return "data:image/png;base64," + base64.b64encode(png).decode("utf-8")
 
-def get_thumbnails(data, bit_depth_scale_factor):
-    thumbnails = []
+def get_images(data, bit_depth_scale_factor=255):
+    images = []
     for gnp in data:
         im = gnp2im(gnp, bit_depth_scale_factor)
         memout = BytesIO()
         im.save(memout, format='png')
-        thumbnails.append(to_base64(memout.getvalue()))
-    return thumbnails
+        images.append(to_base64(memout.getvalue()))
+    return images
 
-def display_event(div, x, y, thumbnails, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
+def display_event(div, x, y, static_images, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
     "Build a suitable CustomJS to display the current event in the div model."
-    return CustomJS(args=dict(div=div, x=x, y=y, thumbnails=thumbnails, image_brightness=image_brightness), code="""
+    return CustomJS(args=dict(div=div, x=x, y=y, static_images=static_images, image_brightness=image_brightness), code="""
         var attrs = %s; var args = []; var n = x.length;
         
         var test_x;
@@ -264,7 +266,7 @@ def display_event(div, x, y, thumbnails, image_brightness, attributes=[], style 
         }
         
         var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
-        var img_tag = "<div><img src='" + thumbnails[minDiffIndex] + "' " + img_tag_attrs + "></img></div>";
+        var img_tag = "<div><img src='" + static_images[minDiffIndex] + "' " + img_tag_attrs + "></img></div>";
         //var line = img_tag + "\\n";
         var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
         div.text = "";
@@ -274,6 +276,45 @@ def display_event(div, x, y, thumbnails, image_brightness, attributes=[], style 
             lines.shift();
         div.text = lines.join("\\n");
     """ % (attributes, style))
+
+# unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+def display_event2(img, x, y, images, attributes=[]):
+    "Build a suitable CustomJS to display the current event in the image plot."
+    return CustomJS(args=dict(img=img, x=x, y=y, images=images, attributes=attributes), code="""
+        var attrs = %s; var args = []; var n = x.length;
+        
+        var test_x;
+        var test_y;
+        for (var i = 0; i < attrs.length; i++) {
+            if (attrs[i] == 'x') {
+                test_x = Number(cb_obj[attrs[i]]);
+            }
+            
+            if (attrs[i] == 'y') {
+                test_y = Number(cb_obj[attrs[i]]);
+            }
+        }
+    
+        var minDiffIndex = -1;
+        var minDiff = 99999;
+        var squareDiff;
+        for (var i = 0; i < n; i++) {
+            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            if (squareDiff < minDiff) {
+                minDiff = squareDiff;
+                minDiffIndex = i;
+            }
+        }
+        
+        if (minDiffIndex > -1) {
+            // identify the image that corresponds to the nearest (x, y) point
+            var image = images[minDiffIndex];
+
+            // plot the image
+            im.data['values'][0] = image;
+            im.change.emit();
+        }
+    """ % (attributes,))
 
 def display_real2d_plot(real2d, x, y, rotation_matrices, atomic_coordinates, attributes=[]):
     "Build a suitable CustomJS to display the current event in the real2d_plot scatter plot."
@@ -337,10 +378,118 @@ def display_real2d_plot(real2d, x, y, rotation_matrices, atomic_coordinates, att
         }
     """ % (attributes))    
 
+# optimize orientation plotting
+def display_real2d_plot2(real2d, x, y, quaternions, atomic_coordinates, attributes=[]):
+    "Build a suitable CustomJS to display the current event in the real2d_plot scatter plot."
+    return CustomJS(args=dict(real2d=real2d, x=x, y=y, quaternions=quaternions, atomic_coordinates=atomic_coordinates), code="""
+        // Adapted from:
+        // 1. https://stackoverflow.com/questions/27205018/multiply-2-matrices-in-javascript
+        // 2. https://en.wikipedia.org/wiki/Transpose
+        function transposeSecondArgThenMultiplyMatrices(m1, m2) {
+            var result = [];
+            for (var i = 0; i < m1.length; i++) {
+                result[i] = [];
+                for (var j = 0; j < m2.length; j++) {
+                    var sum = 0;
+                    for (var k = 0; k < m1[0].length; k++) {                        
+                        sum += m1[i][k] * m2[j][k];
+                    }
+                    result[i][j] = sum;
+                }
+            }
+            return result;
+        }
+        
+        // Adapted from: https://sscc.nimh.nih.gov/pub/dist/bin/linux_gcc32/meica.libs/nibabel/quaternions.py
+        function quat2mat(quaternion) {
+            var w = quaternion[0];
+            var x = quaternion[1];
+            var y = quaternion[2];
+            var z = quaternion[3];
+
+            var Nq = w*w + x*x + y*y + z*z;
+
+            var FLOAT_EPS = 2.220446049250313e-16;
+
+            if (Nq < FLOAT_EPS) {
+                 return [[1, 0, 0], 
+                         [0, 1, 0], 
+                         [0, 0, 1]];
+            }
+
+            var s = 2.0 / Nq;
+
+            var X = x * s;
+            var Y = y * s;
+            var Z = z * s;
+
+            var wX = w * X; 
+            var wY = w * Y; 
+            var wZ = w * Z;
+
+            var xX = x * X; 
+            var xY = x * Y; 
+            var xZ = x * Z;
+
+            var yY = y * Y; 
+            var yZ = y * Z; 
+
+            var zZ = z * Z;
+
+            return [[ 1.0-(yY+zZ), xY-wZ, xZ+wY ],
+                    [ xY+wZ, 1.0-(xX+zZ), yZ-wX ],
+                    [ xZ-wY, yZ+wX, 1.0-(xX+yY) ]];
+        }   
+    
+        var attrs = %s; var args = []; var n = x.length;
+        
+        var test_x;
+        var test_y;
+        for (var i = 0; i < attrs.length; i++) {
+            if (attrs[i] == 'x') {
+                test_x = Number(cb_obj[attrs[i]]);
+            }
+            
+            if (attrs[i] == 'y') {
+                test_y = Number(cb_obj[attrs[i]]);
+            }
+        }
+    
+        var minDiffIndex = -1;
+        var minDiff = 99999;
+        var squareDiff;
+        for (var i = 0; i < n; i++) {
+            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            if (squareDiff < minDiff) {
+                minDiff = squareDiff;
+                minDiffIndex = i;
+            }
+        }
+                
+        if (minDiffIndex > -1) {
+            // identify the quaternion that corresponds to the nearest (azimuth, elevation) point
+            var quaternion = quaternions[minDiffIndex];
+            
+            // compute the rotation matrix that corresponds to the quaternion
+            var rotation_matrix = quat2mat(quaternion);
+
+            // rotate atomic_coordinates using rotation_matrix
+            // Adapted from: /reg/neh/home/dujardin/pysingfel/examples/scripts/gui.py
+            var rotated_atomic_coordinates = transposeSecondArgThenMultiplyMatrices(rotation_matrix, atomic_coordinates);
+
+            // scatter plot the rotated_atomic_coordinates
+            // Adapted from: /reg/neh/home/dujardin/pysingfel/examples/scripts/gui.py
+            real2d.data['x'] = rotated_atomic_coordinates[1];
+            real2d.data['y'] = rotated_atomic_coordinates[0];
+            real2d.change.emit();
+        }
+    """ % (attributes)) 
+
 def visualize(dataset_file, image_type, latent_method, 
               latent_idx_1=None, latent_idx_2=None, 
               particle_property=None,
               particle_plot_x_axis_label_text_font_size='20pt', particle_plot_y_axis_label_text_font_size='20pt',
+              real2d_plot_x_lower=-2e-9, real2d_plot_x_upper=2e-9, real2d_plot_y_lower=-2e-9, real2d_plot_y_upper=2e-9,
               x_axis_label_text_font_size='20pt', y_axis_label_text_font_size='20pt', 
               index_label_text_font_size='20px',
               image_brightness=1.0, 
@@ -348,6 +497,7 @@ def visualize(dataset_file, image_type, latent_method,
               image_size_scale_factor = 0.9, 
               color_bar_height = 400, color_bar_width = 120):
     
+    tic = time.time()
     with h5.File(dataset_file, "r") as dataset_file_handle:
         images = dataset_file_handle[image_type][:]
         latent = dataset_file_handle[latent_method][:]
@@ -355,18 +505,38 @@ def visualize(dataset_file, image_type, latent_method,
         if latent_method == "orientations":
             atomic_coordinates = dataset_file_handle[particle_property][:]
         
-        labels = np.zeros(len(images)) # unclear on how to plot targets
+        # unclear on how to plot targets
+        # labels = np.zeros(len(images)) 
 
-    n_labels = len(np.unique(labels))
-    
-    bit_depth_scale_factor = 255
-    thumbnails = get_thumbnails(images, bit_depth_scale_factor)
-    
-    p = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-    p.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
-    p.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+    toc = time.time()
+    print("It takes {:.2f} seconds to load the data.".format(toc-tic))
 
-    div = Div(width=int(figure_width*image_size_scale_factor), height=int(figure_height*image_size_scale_factor))
+    # unclear on how to plot targets
+    # n_labels = len(np.unique(labels))
+        
+    tic = time.time()
+    static_images = get_images(images)
+    toc = time.time()
+    print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
+    
+    scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+    scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
+    scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+
+    # Container to display the static_images
+    div_width = int(figure_width * image_size_scale_factor)
+    div_height = int(figure_height * image_size_scale_factor)
+    div = Div(width=div_width, height=div_height)
+    
+    # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+    # # https://stackoverflow.com/questions/33789011/bokeh-implementing-custom-javascript-in-an-image-plot
+    # img_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+    # x = np.linspace(0, 10, 1024)
+    # y = np.linspace(0, 10, 1040)
+    # xx, yy = np.meshgrid(x, y)
+    # d = np.sin(xx) * np.cos(yy)
+    # img_plot_data_source = ColumnDataSource(data=dict(values=[d], x_vals=[x], y_vals=[y]))
+    # img_plot.image(image='values', x=0, y=0, dw=10, dh=10, palette="Spectral11", source=img_plot_data_source)
     
     point_attributes = ['x', 'y']
 
@@ -374,34 +544,37 @@ def visualize(dataset_file, image_type, latent_method,
         x = latent[:, latent_idx_1]
         y = latent[:, latent_idx_2]   
         
-        p.scatter(x, y, fill_alpha=0.6)
-        p.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        p.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.scatter(x, y, fill_alpha=0.6)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
 
-        layout = row(p, div)
+        layout = row(scatter_plot, div)
+
+        # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+        # layout = row(p, img_plot)
     elif latent_method == "diffusion_map":  
         x = latent[:, latent_idx_1]
         y = latent[:, latent_idx_2]   
         
-        p.scatter(x, y, fill_alpha=0.6)
-        p.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
-        p.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
+        scatter_plot.scatter(x, y, fill_alpha=0.6)
+        scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
+        scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
 
-        layout = row(p, div)
+        layout = row(scatter_plot, div)
 
-    elif latent_method == "orientations":  
+        # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+        # layout = row(p, img_plot)
+    elif latent_method == "orientations":   
         # quaternion -> angle-axis -> (azimuth, elevation), rotation angle about axis
         x, y, rotation_angles = get_elevation_azimuth_rotation_angles_from_orientations(latent)
+
+        # testing whether the following modification will speed up the code
         
         # quaternion -> 3d rotation matrix
-        rotation_matrices = get_3d_rotation_matrices_from_quaternions(latent)
+        # rotation_matrices = get_3d_rotation_matrices_from_quaternions(latent)
         
+        # previous method
         #rotation_matrices = get_3d_rotation_matrices_from_azimuth_elevation_coordinates(x, y)
-        
-#         def rotate_atomic_coordinates_using_3d_rotation_matrices(atomic_coordinates, rotation_matrices):        
-#             for rot in rotation_matrices:
-#                 rotated_atomic_coordinates = np.matmul(rot, atomic_coordinates.T)              
-#         rotated_atomic_coordinates = rotate_atomic_coordinates_using_3d_rotation_matrices(atomic_coordinates, rotation_matrices)
         
         colors, color_mapper = get_colors_from_rotation_angles(rotation_angles)
         
@@ -416,14 +589,17 @@ def visualize(dataset_file, image_type, latent_method,
         real2d_plot.xaxis.axis_label = "Y"
         real2d_plot.yaxis.axis_label = "X"
         
-        left, right, bottom, top = -2e-9, 2e-9, -2e-9, 2e-9
-        real2d_plot.x_range=Range1d(left, right)
-        real2d_plot.y_range=Range1d(bottom, top)
+        real2d_plot.x_range = Range1d(real2d_plot_x_lower, real2d_plot_x_upper)
+        real2d_plot.y_range = Range1d(real2d_plot_y_lower, real2d_plot_y_upper)
                 
-        p.scatter(x, y, fill_alpha=0.6, fill_color=colors, line_color=None)
+        scatter_plot.scatter(x, y, fill_alpha=0.6, fill_color=colors, line_color=None)
         
-        p.xaxis.axis_label = "Azimuth"
-        p.yaxis.axis_label = "Elevation"
+        scatter_plot.xaxis.axis_label = "Azimuth"
+        scatter_plot.yaxis.axis_label = "Elevation"
+        
+        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, -np.pi / 2, np.pi / 2
+        scatter_plot.x_range = Range1d(scatter_plot_x_lower, scatter_plot_x_upper)
+        scatter_plot.y_range = Range1d(scatter_plot_y_lower, scatter_plot_y_upper)
         
         color_bar_plot = figure(title="Rotation", title_location="right", 
                                 height=color_bar_height, width=color_bar_width, 
@@ -438,16 +614,25 @@ def visualize(dataset_file, image_type, latent_method,
         color_bar = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0,0))
         color_bar_plot.add_layout(color_bar, "right")
         
-        layout = row(real2d_plot, p, color_bar_plot, div)
-                
-        p.js_on_event(events.MouseMove, display_real2d_plot(real2d_plot_data_source, x, y, rotation_matrices, atomic_coordinates, attributes=point_attributes))
+        layout = row(real2d_plot, scatter_plot, color_bar_plot, img_plot)
+        
+        # scatter_plot.js_on_event(events.MouseMove, display_real2d_plot(real2d_plot_data_source, x, y, rotation_matrices, atomic_coordinates, attributes=point_attributes))
+        
+        # optimize orientation plotting
+        # testing whether the following modification will speed up the code
+        scatter_plot.js_on_event(events.MouseMove, display_real2d_plot2(real2d_plot_data_source, x, y, latent, atomic_coordinates, attributes=point_attributes))
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
         
-    p.js_on_event(events.MouseMove, display_event(div, x, y, thumbnails, image_brightness, attributes=point_attributes, style='font-size:{};text-align:center'.format(index_label_text_font_size)))
-    #p.js_on_event(events.Tap, display_event(div, x, y, thumbnails, attributes=point_attributes))
+    scatter_plot.js_on_event(events.MouseMove, display_event(div, x, y, static_images, image_brightness, attributes=point_attributes, style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+    
+    # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+    # scatter_plot.js_on_event(events.MouseMove, display_event2(img_plot_data_source, x, y, images, attributes=point_attributes))
 
+    tic = time.time()
     show(layout)
-
+    toc = time.time()
+    print("It takes {:.2f} seconds to display the data.".format(toc-tic))
+        
 def output_notebook():
-	bokeh.io.output_notebook()
+    bokeh.io.output_notebook()
