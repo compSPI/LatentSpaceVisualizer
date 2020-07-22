@@ -550,7 +550,7 @@ def visualize(dataset_file, image_type, latent_method,
 
         layout = row(scatter_plot, div)
 
-        # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+        # optimize image plotting
         # layout = row(p, img_plot)
     elif latent_method == "diffusion_map":  
         x = latent[:, latent_idx_1]
