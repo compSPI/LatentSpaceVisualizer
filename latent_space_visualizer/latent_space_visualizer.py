@@ -237,9 +237,9 @@ def get_images(data, bit_depth_scale_factor=255):
         images.append(to_base64(memout.getvalue()))
     return images
 
-def display_event(div, x, y, static_images, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
+def display_image_plot(div, x, y, slac_username, dataset_name, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
     "Build a suitable CustomJS to display the current event in the div model."
-    return CustomJS(args=dict(div=div, x=x, y=y, static_images=static_images, image_brightness=image_brightness), code="""
+    return CustomJS(args=dict(div=div, x=x, y=y, slac_username=slac_username, dataset_name=dataset_name, image_brightness=image_brightness), code="""
         var attrs = %s; var args = []; var n = x.length;
         
         var test_x;
@@ -264,9 +264,10 @@ def display_event(div, x, y, static_images, image_brightness, attributes=[], sty
                 minDiffIndex = i;
             }
         }
-        
+                
+        var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + slac_username + "/files/" + dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
         var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
-        var img_tag = "<div><img src='" + static_images[minDiffIndex] + "' " + img_tag_attrs + "></img></div>";
+        var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
         //var line = img_tag + "\\n";
         var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
         div.text = "";
@@ -277,44 +278,44 @@ def display_event(div, x, y, static_images, image_brightness, attributes=[], sty
         div.text = lines.join("\\n");
     """ % (attributes, style))
 
-# unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
-def display_event2(img, x, y, images, attributes=[]):
-    "Build a suitable CustomJS to display the current event in the image plot."
-    return CustomJS(args=dict(img=img, x=x, y=y, images=images, attributes=attributes), code="""
-        var attrs = %s; var args = []; var n = x.length;
+# # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
+# def display_image_plot2(img, x, y, images, attributes=[]):
+#     "Build a suitable CustomJS to display the current event in the image plot."
+#     return CustomJS(args=dict(img=img, x=x, y=y, images=images, attributes=attributes), code="""
+#         var attrs = %s; var args = []; var n = x.length;
         
-        var test_x;
-        var test_y;
-        for (var i = 0; i < attrs.length; i++) {
-            if (attrs[i] == 'x') {
-                test_x = Number(cb_obj[attrs[i]]);
-            }
+#         var test_x;
+#         var test_y;
+#         for (var i = 0; i < attrs.length; i++) {
+#             if (attrs[i] == 'x') {
+#                 test_x = Number(cb_obj[attrs[i]]);
+#             }
             
-            if (attrs[i] == 'y') {
-                test_y = Number(cb_obj[attrs[i]]);
-            }
-        }
+#             if (attrs[i] == 'y') {
+#                 test_y = Number(cb_obj[attrs[i]]);
+#             }
+#         }
     
-        var minDiffIndex = -1;
-        var minDiff = 99999;
-        var squareDiff;
-        for (var i = 0; i < n; i++) {
-            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
-            if (squareDiff < minDiff) {
-                minDiff = squareDiff;
-                minDiffIndex = i;
-            }
-        }
+#         var minDiffIndex = -1;
+#         var minDiff = 99999;
+#         var squareDiff;
+#         for (var i = 0; i < n; i++) {
+#             squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+#             if (squareDiff < minDiff) {
+#                 minDiff = squareDiff;
+#                 minDiffIndex = i;
+#             }
+#         }
         
-        if (minDiffIndex > -1) {
-            // identify the image that corresponds to the nearest (x, y) point
-            var image = images[minDiffIndex];
+#         if (minDiffIndex > -1) {
+#             // identify the image that corresponds to the nearest (x, y) point
+#             var image = images[minDiffIndex];
 
-            // plot the image
-            im.data['values'][0] = image;
-            im.change.emit();
-        }
-    """ % (attributes,))
+#             // plot the image
+#             im.data['values'][0] = image;
+#             im.change.emit();
+#         }
+#     """ % (attributes,))
 
 def display_real2d_plot(real2d, x, y, rotation_matrices, atomic_coordinates, attributes=[]):
     "Build a suitable CustomJS to display the current event in the real2d_plot scatter plot."
@@ -379,7 +380,7 @@ def display_real2d_plot(real2d, x, y, rotation_matrices, atomic_coordinates, att
     """ % (attributes))    
 
 # optimize orientation plotting
-def display_real2d_plot2(real2d, x, y, quaternions, atomic_coordinates, attributes=[]):
+def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coordinates, attributes=[]):
     "Build a suitable CustomJS to display the current event in the real2d_plot scatter plot."
     return CustomJS(args=dict(real2d=real2d, x=x, y=y, quaternions=quaternions, atomic_coordinates=atomic_coordinates), code="""
         // Adapted from:
@@ -485,7 +486,8 @@ def display_real2d_plot2(real2d, x, y, quaternions, atomic_coordinates, attribut
         }
     """ % (attributes)) 
 
-def visualize(dataset_file, image_type, latent_method, 
+def visualize(slac_username, dataset_name, dataset_file, 
+              image_type, latent_method, 
               latent_idx_1=None, latent_idx_2=None, 
               particle_property=None,
               particle_plot_x_axis_label_text_font_size='20pt', particle_plot_y_axis_label_text_font_size='20pt',
@@ -499,8 +501,8 @@ def visualize(dataset_file, image_type, latent_method,
     
     tic = time.time()
     with h5.File(dataset_file, "r") as dataset_file_handle:
-        images = dataset_file_handle[image_type][:]
-        latent = dataset_file_handle[latent_method][:]
+        images = dataset_file_handle[image_type][:50]
+        latent = dataset_file_handle[latent_method][:50]
         
         if latent_method == "orientations":
             atomic_coordinates = dataset_file_handle[particle_property][:]
@@ -514,10 +516,11 @@ def visualize(dataset_file, image_type, latent_method,
     # unclear on how to plot targets
     # n_labels = len(np.unique(labels))
         
-    tic = time.time()
-    static_images = get_images(images)
-    toc = time.time()
-    print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
+    # load saved images for image plot on demand
+#     tic = time.time()
+#     static_images = get_images(images)
+#     toc = time.time()
+#     print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
     
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
     scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
@@ -614,17 +617,24 @@ def visualize(dataset_file, image_type, latent_method,
         color_bar = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0,0))
         color_bar_plot.add_layout(color_bar, "right")
         
-        layout = row(real2d_plot, scatter_plot, color_bar_plot, img_plot)
+        layout = row(real2d_plot, scatter_plot, color_bar_plot, div)
         
-        # scatter_plot.js_on_event(events.MouseMove, display_real2d_plot(real2d_plot_data_source, x, y, rotation_matrices, atomic_coordinates, attributes=point_attributes))
+        # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash 
+        # layout = row(real2d_plot, scatter_plot, color_bar_plot, img_plot)
+        
+#         scatter_plot.js_on_event(events.MouseMove, display_real2d_plot(real2d_plot_data_source, x, y, rotation_matrices, atomic_coordinates, attributes=point_attributes))
         
         # optimize orientation plotting
         # testing whether the following modification will speed up the code
-        scatter_plot.js_on_event(events.MouseMove, display_real2d_plot2(real2d_plot_data_source, x, y, latent, atomic_coordinates, attributes=point_attributes))
+        scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_using_quaternions(real2d_plot_data_source, x, y, latent, atomic_coordinates, attributes=point_attributes))
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
-        
-    scatter_plot.js_on_event(events.MouseMove, display_event(div, x, y, static_images, image_brightness, attributes=point_attributes, style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+    
+#     print(static_images[0])
+    
+#     import sys
+#     print(sys.getsizeof(static_images[0] * len(static_images)))
+    scatter_plot.js_on_event(events.MouseMove, display_image_plot(div, x, y, slac_username, dataset_name, image_brightness, attributes=point_attributes, style='font-size:{};text-align:center'.format(index_label_text_font_size)))
     
     # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
     # scatter_plot.js_on_event(events.MouseMove, display_event2(img_plot_data_source, x, y, images, attributes=point_attributes))
