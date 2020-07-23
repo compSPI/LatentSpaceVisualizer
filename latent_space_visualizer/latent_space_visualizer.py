@@ -237,9 +237,49 @@ def get_images(data, bit_depth_scale_factor=255):
         images.append(to_base64(memout.getvalue()))
     return images
 
-def display_image_plot(div, x, y, slac_username, dataset_name, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
+def display_image_plot(div, x, y, static_images, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
     "Build a suitable CustomJS to display the current event in the div model."
-    return CustomJS(args=dict(div=div, x=x, y=y, slac_username=slac_username, dataset_name=dataset_name, image_brightness=image_brightness), code="""
+    return CustomJS(args=dict(div=div, x=x, y=y, static_images=static_images, image_brightness=image_brightness), code="""
+        var attrs = %s; var args = []; var n = x.length;
+        
+        var test_x;
+        var test_y;
+        for (var i = 0; i < attrs.length; i++) {
+            if (attrs[i] == 'x') {
+                test_x = Number(cb_obj[attrs[i]]);
+            }
+            
+            if (attrs[i] == 'y') {
+                test_y = Number(cb_obj[attrs[i]]);
+            }
+        }
+    
+        var minDiffIndex = -1;
+        var minDiff = 99999;
+        var squareDiff;
+        for (var i = 0; i < n; i++) {
+            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            if (squareDiff < minDiff) {
+                minDiff = squareDiff;
+                minDiffIndex = i;
+            }
+        }
+        
+        var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
+        var img_tag = "<div><img src='" + static_images[minDiffIndex] + "' " + img_tag_attrs + "></img></div>";
+        //var line = img_tag + "\\n";
+        var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
+        div.text = "";
+        var text = div.text.concat(line);
+        var lines = text.split("\\n")
+        if (lines.length > 35)
+            lines.shift();
+        div.text = lines.join("\\n");
+    """ % (attributes, style))
+
+def display_image_plot_on_slac_pswww(div, x, y, slac_username, slac_dataset_name, image_brightness, attributes=[], style = 'font-size:20px;text-align:center'):
+    "Build a suitable CustomJS to display the current event in the div model."
+    return CustomJS(args=dict(div=div, x=x, y=y, slac_username=slac_username, slac_dataset_name=slac_dataset_name, image_brightness=image_brightness), code="""
         var attrs = %s; var args = []; var n = x.length;
         
         var test_x;
@@ -265,7 +305,7 @@ def display_image_plot(div, x, y, slac_username, dataset_name, image_brightness,
             }
         }
                 
-        var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + slac_username + "/files/" + dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
+        var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + slac_username + "/files/" + slac_dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
         var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
         var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
         //var line = img_tag + "\\n";
@@ -486,8 +526,10 @@ def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coor
         }
     """ % (attributes)) 
 
-def visualize(slac_username, dataset_name, dataset_file, 
+def visualize(dataset_file, 
               image_type, latent_method, 
+              image_location=None, 
+              slac_username=None, slac_dataset_name=None, 
               latent_idx_1=None, latent_idx_2=None, 
               particle_property=None,
               particle_plot_x_axis_label_text_font_size='20pt', particle_plot_y_axis_label_text_font_size='20pt',
@@ -501,8 +543,8 @@ def visualize(slac_username, dataset_name, dataset_file,
     
     tic = time.time()
     with h5.File(dataset_file, "r") as dataset_file_handle:
-        images = dataset_file_handle[image_type][:50]
-        latent = dataset_file_handle[latent_method][:50]
+        # images = dataset_file_handle[image_type][:]
+        latent = dataset_file_handle[latent_method][:]
         
         if latent_method == "orientations":
             atomic_coordinates = dataset_file_handle[particle_property][:]
@@ -511,7 +553,7 @@ def visualize(slac_username, dataset_name, dataset_file,
         # labels = np.zeros(len(images)) 
 
     toc = time.time()
-    print("It takes {:.2f} seconds to load the data.".format(toc-tic))
+    print("It takes {:.2f} seconds to load the latent vectors and metadata from the HDF5 file.".format(toc-tic))
 
     # unclear on how to plot targets
     # n_labels = len(np.unique(labels))
@@ -626,7 +668,11 @@ def visualize(slac_username, dataset_name, dataset_file,
         
         # optimize orientation plotting
         # testing whether the following modification will speed up the code
-        scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_using_quaternions(real2d_plot_data_source, x, y, latent, atomic_coordinates, attributes=point_attributes))
+        scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_using_quaternions(
+                                                            real2d_plot_data_source, x, y, 
+                                                            latent, 
+                                                            atomic_coordinates, 
+                                                            attributes=point_attributes))
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
     
@@ -634,7 +680,41 @@ def visualize(slac_username, dataset_name, dataset_file,
     
 #     import sys
 #     print(sys.getsizeof(static_images[0] * len(static_images)))
-    scatter_plot.js_on_event(events.MouseMove, display_image_plot(div, x, y, slac_username, dataset_name, image_brightness, attributes=point_attributes, style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+    
+    if image_location == "slac-pswww":
+        if slac_username is None:
+            raise Exception("Please provide: slac_username")
+        
+        if slac_dataset_name is None:
+            raise Exception("Please provide: slac_dataset_name")
+        
+        scatter_plot.js_on_event(events.MouseMove, display_image_plot_on_slac_pswww(
+                                                             div, x, y, 
+                                                             slac_username, slac_dataset_name, 
+                                                             image_brightness, 
+                                                             attributes=point_attributes, 
+                                                             style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+    elif image_location is None:
+        tic = time.time()
+        with h5.File(dataset_file, "r") as dataset_file_handle:
+            images = dataset_file_handle[image_type][:]
+        toc = time.time()
+        print("It takes {:.2f} seconds to load images from the HDF5 file.".format(toc-tic))
+        
+        tic = time.time()
+        static_images = get_images(images)
+        toc = time.time()
+        print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
+
+        scatter_plot.js_on_event(events.MouseMove, display_image_plot(
+                                                             div, x, y, 
+                                                             static_images,
+                                                             image_brightness, 
+                                                             attributes=point_attributes, 
+                                                             style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+    else:
+        raise Exception("Unknown image location.")
+    
     
     # unclear on how to optimize image plotting since loading large images into the event handler causes browser tab to crash
     # scatter_plot.js_on_event(events.MouseMove, display_event2(img_plot_data_source, x, y, images, attributes=point_attributes))
@@ -642,7 +722,7 @@ def visualize(slac_username, dataset_name, dataset_file,
     tic = time.time()
     show(layout)
     toc = time.time()
-    print("It takes {:.2f} seconds to display the data.".format(toc-tic))
+    print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
         
 def output_notebook():
     bokeh.io.output_notebook()
