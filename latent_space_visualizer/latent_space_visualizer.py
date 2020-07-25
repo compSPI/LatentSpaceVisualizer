@@ -196,8 +196,8 @@ def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coor
 
             // scatter plot the rotated_atomic_coordinates
             // Adapted from: /reg/neh/home/dujardin/pysingfel/examples/scripts/gui.py
-            real2d.data['x'] = rotated_atomic_coordinates[0];
-            real2d.data['y'] = rotated_atomic_coordinates[1];
+            real2d.data['x'] = rotated_atomic_coordinates[1]; // x-axis represents the y-coordinate
+            real2d.data['y'] = rotated_atomic_coordinates[0]; // y-axis represents the x-coordinate
             real2d.change.emit();
         }
     """ % (attributes)) 
@@ -303,7 +303,7 @@ def display_image_plot_on_slac_pswww(div, x, y, slac_username, slac_dataset_name
         }
                 
         var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + slac_username + "/files/" + slac_dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
-        var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
+        var img_tag_attrs = "style='filter: brightness(" + image_brightness + "); transform: scaleY(-1);'";
         var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
         //var line = img_tag + "\\n";
         var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
@@ -332,28 +332,24 @@ def visualize(dataset_file,
               image_brightness=1.0, 
               figure_width = 450, figure_height = 450, 
               image_size_scale_factor = 0.9, 
-              color_bar_height = 400, color_bar_width = 120):
+              color_bar_height = 400, color_bar_width = 120,
+              particle_atoms_random_sample_size=1000):
     
     tic = time.time()
     with h5.File(dataset_file, "r") as dataset_file_handle:
         latent = dataset_file_handle[latent_method][:]
         
         if latent_method == "orientations":
-            atomic_coordinates = dataset_file_handle[particle_property][:]
+            atomic_coordinates = dataset_file_handle[particle_property][:]            
         
         # unclear on how to plot targets
         # labels = np.zeros(len(images)) 
 
     toc = time.time()
     print("It takes {:.2f} seconds to load the latent vectors and metadata from the HDF5 file.".format(toc-tic))
-
+    
     # unclear on how to plot targets
     # n_labels = len(np.unique(labels))
-    
-    # Scatter plot for the latent vectors
-    scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-    scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
-    scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
 
     # Keep track of the mouse x and y positions in the scatter plot
     point_attributes = ['x', 'y']
@@ -367,20 +363,46 @@ def visualize(dataset_file,
         x = latent[:, latent_idx_1]
         y = latent[:, latent_idx_2]   
         
-        # Scatter plot
-        scatter_plot.scatter(x, y, fill_alpha=0.6)
+        # Scatter plot for the latent vectors
+        source = ColumnDataSource(data=dict(
+            x=x,
+            y=y,
+            z=rotation_angles
+        ))
+        #         tooltips = [
+#             ("(x,y,z)", "($x, $y, $z)"),
+#         ]
+#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+        scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+        
+        scatter_plot.scatter('x', 'y', source=source, fill_alpha=0.6)
         scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
         scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
 
         # Build layout for plots
         layout = row(scatter_plot, div)
         
-    elif latent_method == "diffusion_map":  
+    elif latent_method == "diffusion_map":          
         x = latent[:, latent_idx_1]
         y = latent[:, latent_idx_2]   
         
-        # Scatter plot
-        scatter_plot.scatter(x, y, fill_alpha=0.6)
+        # Scatter plot for the latent vectors
+        source = ColumnDataSource(data=dict(
+            x=x,
+            y=y,
+            z=rotation_angles
+        ))
+#         tooltips = [
+#             ("(x,y,z)", "($x, $y, $z)"),
+#         ]
+#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+        scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+        
+        scatter_plot.scatter('x', 'y', source=source, fill_alpha=0.6)
         scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
         scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
 
@@ -394,6 +416,33 @@ def visualize(dataset_file,
         # Use rotation_angles to color the points on the scatter plots
         colors, color_mapper = get_colors_from_rotation_angles(rotation_angles)
         
+        # Scatter plot for the latent vectors
+        source = ColumnDataSource(data=dict(
+            x=x,
+            y=y,
+            z=rotation_angles,
+            colors=colors,
+            azimuth=x / np.pi * 180,
+            elevation=y / np.pi * 180,
+            rotation=rotation_angles / np.pi * 180
+        ))
+        #         tooltips = [
+#             ("(x,y,z)", "($x, $y, $z)"),
+#         ]
+#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+        scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+                
+        scatter_plot.circle('x', 'y', fill_alpha=0.6, fill_color='colors', line_color=None, source=source)
+        
+        scatter_plot.xaxis.axis_label = "Azimuth"
+        scatter_plot.yaxis.axis_label = "Elevation"
+        
+        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, -np.pi / 2, np.pi / 2
+        scatter_plot.x_range = Range1d(scatter_plot_x_lower, scatter_plot_x_upper)
+        scatter_plot.y_range = Range1d(scatter_plot_y_lower, scatter_plot_y_upper)
+        
         # Real-space XY projection plots
         real2d_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
         real2d_plot.xaxis.axis_label_text_font_size = particle_plot_x_axis_label_text_font_size
@@ -403,21 +452,12 @@ def visualize(dataset_file,
         
         real2d_plot.scatter('x', 'y', source=real2d_plot_data_source)
         
-        real2d_plot.xaxis.axis_label = "X"
-        real2d_plot.yaxis.axis_label = "Y"
+        # Assuming the beam travels in the +Z direction, the real-space XY projection plot faces the beam.
+        real2d_plot.xaxis.axis_label = "Y"
+        real2d_plot.yaxis.axis_label = "X"
         
         real2d_plot.x_range = Range1d(real2d_plot_x_lower, real2d_plot_x_upper)
         real2d_plot.y_range = Range1d(real2d_plot_y_lower, real2d_plot_y_upper)
-        
-        # Scatter plot
-        scatter_plot.scatter(x, y, fill_alpha=0.6, fill_color=colors, line_color=None)
-        
-        scatter_plot.xaxis.axis_label = "Azimuth"
-        scatter_plot.yaxis.axis_label = "Elevation"
-        
-        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, -np.pi / 2, np.pi / 2
-        scatter_plot.x_range = Range1d(scatter_plot_x_lower, scatter_plot_x_upper)
-        scatter_plot.y_range = Range1d(scatter_plot_y_lower, scatter_plot_y_upper)
         
         # Color bar
         color_bar_plot = figure(title="Rotation", title_location="right", 
@@ -435,6 +475,10 @@ def visualize(dataset_file,
         
         # Build layout for plots
         layout = row(real2d_plot, scatter_plot, color_bar_plot, div)
+        
+        # To prevent a lag when displaying particle with several atoms, randomly select particle_random_sample_size atoms
+        particle_atoms_random_sample_idx = np.random.choice(len(atomic_coordinates), particle_atoms_random_sample_size, replace=False)
+        atomic_coordinates = atomic_coordinates[particle_atoms_random_sample_idx]
         
         # Display real-space XY projection of particle when mouse is near a point in scatter plot
         scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_using_quaternions(
