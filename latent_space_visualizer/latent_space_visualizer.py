@@ -477,6 +477,7 @@ def visualize(dataset_file,
         layout = row(real2d_plot, scatter_plot, color_bar_plot, div)
         
         # To prevent a lag when displaying particle with several atoms, randomly select particle_random_sample_size atoms
+        particle_atoms_random_sample_size = min(particle_atoms_random_sample_size, len(atomic_coordinates))
         particle_atoms_random_sample_idx = np.random.choice(len(atomic_coordinates), particle_atoms_random_sample_size, replace=False)
         atomic_coordinates = atomic_coordinates[particle_atoms_random_sample_idx]
         
