@@ -26,15 +26,6 @@ from six import string_types
 
 import h5py as h5
 
-
-"""
-Function for displaying Bokeh plots in Jupyter notebook
-"""
-    
-def output_notebook():
-    bokeh.io.output_notebook()
-
-
 """
 Functions for converting from quaternion to (azimuth, elevation, rotation angle)
 """
@@ -316,31 +307,81 @@ def display_image_plot_on_slac_pswww(div, x, y, slac_username, slac_dataset_name
     """ % (attributes, style))
 
 """
+Function for displaying Bokeh plots in Jupyter notebook
+"""
+    
+def output_notebook():
+    """
+    Display Bokeh plots in Jupyter notebook
+    """
+    bokeh.io.output_notebook()
+
+"""
 Function for visualizing data from an HDF5 file
 """
 
-def visualize(dataset_file, 
-              image_type, latent_method, 
-              image_location=None, 
-              slac_username=None, slac_dataset_name=None, 
-              latent_idx_1=None, latent_idx_2=None, 
-              particle_property=None,
-              particle_plot_x_axis_label_text_font_size='20pt', particle_plot_y_axis_label_text_font_size='20pt',
-              real2d_plot_x_lower=-2e-9, real2d_plot_x_upper=2e-9, real2d_plot_y_lower=-2e-9, real2d_plot_y_upper=2e-9,
-              x_axis_label_text_font_size='20pt', y_axis_label_text_font_size='20pt', 
-              index_label_text_font_size='20px',
-              image_brightness=1.0, 
-              figure_width = 450, figure_height = 450, 
-              image_size_scale_factor = 0.9, 
-              color_bar_height = 400, color_bar_width = 120,
-              particle_atoms_random_sample_size=1000):
+def visualize(
+    dataset_file, 
+    image_type, 
+    latent_method, 
+    figure_height = 450, 
+    figure_width = 450, 
+    scatter_plot_x_axis_label_text_font_size='15pt',
+    scatter_plot_y_axis_label_text_font_size='15pt', 
+    scatter_plot_color_bar_height = 400,
+    scatter_plot_color_bar_width = 120,
+    image_plot_image_size_scale_factor = 0.9,
+    image_plot_image_brightness=1.0,
+    image_plot_image_source_location=None, 
+    image_plot_slac_username=None,
+    image_plot_slac_dataset_name=None,
+    image_plot_index_label_text_font_size='20px',
+    real2d_plot_particle_property=None,
+    real2d_plot_particle_atoms_random_sample_size=1000,
+    real2d_plot_x_lower=None,
+    real2d_plot_x_upper=None,
+    real2d_plot_y_lower=None,
+    real2d_plot_y_upper=None,
+    real2d_plot_x_axis_label_text_font_size='15pt',
+    real2d_plot_y_axis_label_text_font_size='15pt'
+    ):
     
+    """
+    Visualize the data from an HDF5 file
+    
+    :param dataset_file: The path to the HDF5 file, as a str
+    :param image_type: A key in the HDF5 file that represents the type of image, as a str
+    :param latent_method: A key in the HDF5 file that represents the latent method used to build the latent space, as a str
+    :param figure_height: height of the figure containing the plots, as an int
+    :param figure_width: width of the figure containing the plots, as an int
+    :param scatter_plot_x_axis_label_text_font_size: Font size of the x axis label for the scatter plot, as a str
+    :param scatter_plot_y_axis_label_text_font_size: Font size of the y axis label for the scatter plot, as a str
+    :param scatter_plot_color_bar_height: height of the color bar, as an int
+    :param scatter_plot_color_bar_width: width of the color bar, as an int
+    :param image_plot_image_size_scale_factor: scale the image size according to a fraction of the figure size, as a float
+    :param image_plot_image_brightness: Brightness of the image displayed in the image plot, as a float
+    :param image_plot_image_source_location: An alias for the determining where to display images from, as a str
+    :param image_plot_slac_username: A valid SLAC username, as a str
+    :param image_plot_slac_dataset_name: The name of the dataset in SLAC Compute Cluster, as a str
+    :param image_plot_index_label_text_font_size: Font size of the label for the index below the image plot, as a float
+    :param real2d_plot_particle_property: A property of the particle, as a str
+    :param real2d_plot_particle_atoms_random_sample_size: Randomly select particle_random_sample_size atoms to be displayed in the real-space XY projection plot, as an int
+    :param real2d_plot_x_lower: The lower limit of the x-axis for the real-space XY projection plot, as a float
+    :param real2d_plot_x_upper: The upper limit of the x-axis for the real-space XY projection plot, as a float
+    :param real2d_plot_y_lower: The lower limit of the y-axis for the real-space XY projection plot, as a float
+    :param real2d_plot_y_upper: The upper limit of the y-axis for the real-space XY projection plot, as a float
+    :param real2d_plot_x_axis_label_text_font_size: font size, as a str
+    :param real2d_plot_y_axis_label_text_font_size: font size, as a str
+    """
+    
+    # Load data from the HDF5 file
+
     tic = time.time()
     with h5.File(dataset_file, "r") as dataset_file_handle:
         latent = dataset_file_handle[latent_method][:]
         
         if latent_method == "orientations":
-            atomic_coordinates = dataset_file_handle[particle_property][:]            
+            atomic_coordinates = dataset_file_handle[real2d_plot_particle_property][:]            
         
         # unclear on how to plot targets
         # labels = np.zeros(len(images)) 
@@ -355,8 +396,8 @@ def visualize(dataset_file,
     point_attributes = ['x', 'y']
     
     # Container to display the static_images
-    div_width = int(figure_width * image_size_scale_factor)
-    div_height = int(figure_height * image_size_scale_factor)
+    div_width = int(figure_width * image_plot_image_size_scale_factor)
+    div_height = int(figure_height * image_plot_image_size_scale_factor)
     div = Div(width=div_width, height=div_height)
 
     if latent_method == "principal_component_analysis":
@@ -369,13 +410,10 @@ def visualize(dataset_file,
             y=y,
             z=rotation_angles
         ))
-        #         tooltips = [
-#             ("(x,y,z)", "($x, $y, $z)"),
-#         ]
-#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+
         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
-        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+        scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
         
         scatter_plot.scatter('x', 'y', source=source, fill_alpha=0.6)
         scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
@@ -394,13 +432,10 @@ def visualize(dataset_file,
             y=y,
             z=rotation_angles
         ))
-#         tooltips = [
-#             ("(x,y,z)", "($x, $y, $z)"),
-#         ]
-#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+
         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
-        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+        scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
         
         scatter_plot.scatter('x', 'y', source=source, fill_alpha=0.6)
         scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
@@ -426,27 +461,24 @@ def visualize(dataset_file,
             elevation=y / np.pi * 180,
             rotation=rotation_angles / np.pi * 180
         ))
-        #         tooltips = [
-#             ("(x,y,z)", "($x, $y, $z)"),
-#         ]
-#         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset,hover", tooltips=tooltips)
+
         scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-        scatter_plot.xaxis.axis_label_text_font_size = x_axis_label_text_font_size
-        scatter_plot.yaxis.axis_label_text_font_size = y_axis_label_text_font_size
+        scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
+        scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
                 
         scatter_plot.circle('x', 'y', fill_alpha=0.6, fill_color='colors', line_color=None, source=source)
         
         scatter_plot.xaxis.axis_label = "Azimuth"
         scatter_plot.yaxis.axis_label = "Elevation"
         
-        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, -np.pi / 2, np.pi / 2
+        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, 0, np.pi / 2
         scatter_plot.x_range = Range1d(scatter_plot_x_lower, scatter_plot_x_upper)
         scatter_plot.y_range = Range1d(scatter_plot_y_lower, scatter_plot_y_upper)
         
         # Real-space XY projection plots
         real2d_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
-        real2d_plot.xaxis.axis_label_text_font_size = particle_plot_x_axis_label_text_font_size
-        real2d_plot.yaxis.axis_label_text_font_size = particle_plot_y_axis_label_text_font_size
+        real2d_plot.xaxis.axis_label_text_font_size = real2d_plot_x_axis_label_text_font_size
+        real2d_plot.yaxis.axis_label_text_font_size = real2d_plot_y_axis_label_text_font_size
         
         real2d_plot_data_source = ColumnDataSource({'x': [], 'y': []})
         
@@ -456,12 +488,15 @@ def visualize(dataset_file,
         real2d_plot.xaxis.axis_label = "Y"
         real2d_plot.yaxis.axis_label = "X"
         
-        real2d_plot.x_range = Range1d(real2d_plot_x_lower, real2d_plot_x_upper)
-        real2d_plot.y_range = Range1d(real2d_plot_y_lower, real2d_plot_y_upper)
+        if real2d_plot_x_lower is not None and real2d_plot_x_upper is not None and real2d_plot_y_lower is not None and real2d_plot_y_upper is not None:
+            real2d_plot.x_range = Range1d(real2d_plot_x_lower, real2d_plot_x_upper)
+            real2d_plot.y_range = Range1d(real2d_plot_y_lower, real2d_plot_y_upper)
         
         # Color bar
-        color_bar_plot = figure(title="Rotation", title_location="right", 
-                                height=color_bar_height, width=color_bar_width, 
+        color_bar_plot = figure(title="Rotation", 
+                                title_location="right", 
+                                height=scatter_plot_color_bar_height, 
+                                width=scatter_plot_color_bar_width, 
                                 min_border=0, 
                                 outline_line_color=None,
                                 toolbar_location=None)
@@ -477,7 +512,7 @@ def visualize(dataset_file,
         layout = row(real2d_plot, scatter_plot, color_bar_plot, div)
         
         # To prevent a lag when displaying particle with several atoms, randomly select particle_random_sample_size atoms
-        particle_atoms_random_sample_size = min(particle_atoms_random_sample_size, len(atomic_coordinates))
+        particle_atoms_random_sample_size = min(real2d_plot_particle_atoms_random_sample_size, len(atomic_coordinates))
         particle_atoms_random_sample_idx = np.random.choice(len(atomic_coordinates), particle_atoms_random_sample_size, replace=False)
         atomic_coordinates = atomic_coordinates[particle_atoms_random_sample_idx]
         
@@ -492,24 +527,24 @@ def visualize(dataset_file,
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
     
     # Directly display images from SLAC PSWWW
-    if image_location == "slac-pswww":
+    if image_plot_image_source_location == "slac-pswww":
         
-        if slac_username is None:
+        if image_plot_slac_username is None:
             raise Exception("Please provide: slac_username")
         
-        if slac_dataset_name is None:
+        if image_plot_slac_dataset_name is None:
             raise Exception("Please provide: slac_dataset_name")
         
         # Display corresponding image when mouse is near a point in scatter plot
         scatter_plot.js_on_event(events.MouseMove, display_image_plot_on_slac_pswww(
                                                              div, x, y, 
-                                                             slac_username, slac_dataset_name, 
-                                                             image_brightness, 
+                                                             image_plot_slac_username, image_plot_slac_dataset_name, 
+                                                             image_plot_image_brightness, 
                                                              attributes=point_attributes, 
-                                                             style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+                                                             style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size)))
     
     # Display PNG image byte strings generated from image arrays in HDF5 file
-    elif image_location is None:
+    elif image_plot_image_source_location is None:
         
         # Load images from HDF5 file
         tic = time.time()
@@ -529,9 +564,9 @@ def visualize(dataset_file,
         scatter_plot.js_on_event(events.MouseMove, display_image_plot(
                                                              div, x, y, 
                                                              static_images,
-                                                             image_brightness, 
+                                                             image_plot_image_brightness, 
                                                              attributes=point_attributes, 
-                                                             style='font-size:{};text-align:center'.format(index_label_text_font_size)))
+                                                             style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size)))
     
     else:
         raise Exception("Unknown image location.")
@@ -541,3 +576,4 @@ def visualize(dataset_file,
     show(layout)
     toc = time.time()
     print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
+
