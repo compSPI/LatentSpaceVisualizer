@@ -393,6 +393,7 @@ def visualize(
     scatter_plot_y_axis_label_text_font_size='15pt', 
     scatter_plot_color_bar_height = 400,
     scatter_plot_color_bar_width = 120,
+    orientation_plot_ref_vector_as_a_list = [1, 0, 0],
     image_plot_image_size_scale_factor = 0.9,
     image_plot_image_brightness=1.0,
     image_plot_image_source_location=None, 
@@ -512,7 +513,7 @@ def visualize(
         x, y, rotation_angles = get_elevation_azimuth_rotation_angles_from_orientations(latent)
         
         # Quaternion -> applied to reference vector -> (azimuth, elevation)
-        ref_vector = np.array([[1, 0, 0]]).T
+        ref_vector = np.array([orientation_plot_ref_vector_as_a_list]).T
         ref_vector_azimuth, ref_vector_elevation = get_elevation_azimuth_from_orientations_applied_to_reference_vector(latent, u = ref_vector)
         
         # Use rotation_angles to color the points on the scatter plots
