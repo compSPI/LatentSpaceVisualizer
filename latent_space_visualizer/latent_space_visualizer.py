@@ -63,6 +63,69 @@ def get_elevation_azimuth_rotation_angles_from_orientations(orientations):
     
     return x, y, z
 
+def quat2mat(q):
+    ''' Calculate rotation matrix corresponding to quaternion
+
+    Parameters
+    ----------
+    q : 4 element array-like
+
+    Returns
+    -------
+    M : (3,3) array
+      Rotation matrix corresponding to input quaternion *q*
+
+    Notes
+    -----
+    Rotation matrix applies to column vectors, and is applied to the
+    left of coordinate vectors.  The algorithm here allows non-unit
+    quaternions.
+
+    References
+    ----------
+    Algorithm from
+    http://en.wikipedia.org/wiki/Rotation_matrix#Quaternion
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> M = quat2mat([1, 0, 0, 0]) # Identity quaternion
+    >>> np.allclose(M, np.eye(3))
+    True
+    >>> M = quat2mat([0, 1, 0, 0]) # 180 degree rotn around axis 0
+    >>> np.allclose(M, np.diag([1, -1, -1]))
+    True
+    '''
+    w, x, y, z = q
+    Nq = w*w + x*x + y*y + z*z
+    FLOAT_EPS = np.finfo(np.float).eps
+    if Nq < FLOAT_EPS:
+        return np.eye(3)
+    s = 2.0/Nq
+    X = x*s
+    Y = y*s
+    Z = z*s
+    wX = w*X; wY = w*Y; wZ = w*Z
+    xX = x*X; xY = x*Y; xZ = x*Z
+    yY = y*Y; yZ = y*Z; zZ = z*Z
+    return np.array(
+           [[ 1.0-(yY+zZ), xY-wZ, xZ+wY ],
+            [ xY+wZ, 1.0-(xX+zZ), yZ-wX ],
+            [ xZ-wY, yZ+wX, 1.0-(xX+yY) ]])
+
+def get_elevation_azimuth_from_orientations_applied_to_reference_vector(orientations, u = np.array([[1, 0, 0]]).T):
+    x = np.zeros((orientations.shape[0],))
+    y = np.zeros((orientations.shape[0],))
+    
+    for orientation_idx, orientation in enumerate(orientations):
+        R = quat2mat(orientation)
+        Ru = np.matmul(R, u)
+        azimuth, elevation = azimuth_elevation_representation(Ru)
+        x[orientation_idx] = azimuth
+        y[orientation_idx] = elevation
+    
+    return x, y
+
 """
 Functions for coloring points in the scatter plot according to rotation angle
 """
@@ -448,6 +511,10 @@ def visualize(
         # Quaternion -> angle-axis -> (azimuth, elevation), rotation angle about axis
         x, y, rotation_angles = get_elevation_azimuth_rotation_angles_from_orientations(latent)
         
+        # Quaternion -> applied to reference vector -> (azimuth, elevation)
+        ref_vector = np.array([[1, 0, 0]]).T
+        ref_vector_azimuth, ref_vector_elevation = get_elevation_azimuth_from_orientations_applied_to_reference_vector(latent, u = ref_vector)
+        
         # Use rotation_angles to color the points on the scatter plots
         colors, color_mapper = get_colors_from_rotation_angles(rotation_angles)
         
@@ -455,6 +522,8 @@ def visualize(
         source = ColumnDataSource(data=dict(
             x=x,
             y=y,
+            ref_vector_azimuth=ref_vector_azimuth,
+            ref_vector_elevation=ref_vector_elevation,
             z=rotation_angles,
             colors=colors,
             azimuth=x / np.pi * 180,
@@ -466,12 +535,12 @@ def visualize(
         scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
         scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
                 
-        scatter_plot.circle('x', 'y', fill_alpha=0.6, fill_color='colors', line_color=None, source=source)
+        scatter_plot.circle('ref_vector_azimuth', 'ref_vector_elevation', fill_alpha=0.6, fill_color='colors', line_color=None, source=source)
         
         scatter_plot.xaxis.axis_label = "Azimuth"
         scatter_plot.yaxis.axis_label = "Elevation"
         
-        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, 0, np.pi / 2
+        scatter_plot_x_lower, scatter_plot_x_upper, scatter_plot_y_lower, scatter_plot_y_upper = -np.pi, np.pi, -np.pi / 2, np.pi / 2
         scatter_plot.x_range = Range1d(scatter_plot_x_lower, scatter_plot_x_upper)
         scatter_plot.y_range = Range1d(scatter_plot_y_lower, scatter_plot_y_upper)
         
@@ -518,7 +587,9 @@ def visualize(
         
         # Display real-space XY projection of particle when mouse is near a point in scatter plot
         scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_using_quaternions(
-                                                            real2d_plot_data_source, x, y, 
+                                                            real2d_plot_data_source, 
+                                                            ref_vector_azimuth, 
+                                                            ref_vector_elevation, 
                                                             latent, 
                                                             atomic_coordinates, 
                                                             attributes=point_attributes))
