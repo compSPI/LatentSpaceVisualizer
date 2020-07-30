@@ -27,6 +27,11 @@ from six import string_types
 import h5py as h5
 
 """
+Deeban Ramalingam (deebanr@slac.stanford.edu)
+"""
+
+
+"""
 Functions for converting from quaternion to (azimuth, elevation, rotation angle)
 """
 
@@ -48,21 +53,23 @@ def azimuth_elevation_representation(unit_vector):
     elevation = np.arctan2(z, np.sqrt(x ** 2 + y ** 2))
     return azimuth, elevation
 
-def get_elevation_azimuth_rotation_angles_from_orientations(orientations):
-    x = np.zeros((orientations.shape[0],))
-    y = np.zeros((orientations.shape[0],))
-    z = np.zeros((orientations.shape[0],))
+def get_azimuth_elevation_rotation_angles_from_orientations(orientations):
+    n_orientations = orientations.shape[0]
+    azimuth_angles = np.zeros((n_orientations,))
+    elevation_angles = np.zeros((n_orientations,))
+    rotation_angles = np.zeros((n_orientations,))
     
     for orientation_idx, orientation in enumerate(orientations):
         axis, theta = angle_axis_representation(orientation)
         azimuth, elevation = azimuth_elevation_representation(axis)
 
-        x[orientation_idx] = azimuth
-        y[orientation_idx] = elevation
-        z[orientation_idx] = theta
+        azimuth_angles[orientation_idx] = azimuth
+        elevation_angles[orientation_idx] = elevation
+        rotation_angles[orientation_idx] = theta
     
-    return x, y, z
+    return azimuth_angles, elevation_angles, rotation_angles
 
+# Adapted from: https://sscc.nimh.nih.gov/pub/dist/bin/linux_gcc32/meica.libs/nibabel/quaternions.py
 def quat2mat(q):
     ''' Calculate rotation matrix corresponding to quaternion
 
@@ -101,30 +108,40 @@ def quat2mat(q):
     FLOAT_EPS = np.finfo(np.float).eps
     if Nq < FLOAT_EPS:
         return np.eye(3)
-    s = 2.0/Nq
-    X = x*s
-    Y = y*s
-    Z = z*s
-    wX = w*X; wY = w*Y; wZ = w*Z
-    xX = x*X; xY = x*Y; xZ = x*Z
-    yY = y*Y; yZ = y*Z; zZ = z*Z
+    
+    s = 2.0 / Nq
+    X = x * s
+    Y = y * s
+    Z = z * s
+    wX = w * X
+    wY = w * Y
+    wZ = w * Z
+    xX = x * X
+    xY = x * Y
+    xZ = x * Z
+    yY = y * Y
+    yZ = y * Z
+    zZ = z * Z
+    
     return np.array(
-           [[ 1.0-(yY+zZ), xY-wZ, xZ+wY ],
-            [ xY+wZ, 1.0-(xX+zZ), yZ-wX ],
-            [ xZ-wY, yZ+wX, 1.0-(xX+yY) ]])
+           [[ 1.0 - (yY + zZ), xY - wZ, xZ + wY ],
+            [ xY + wZ, 1.0 - (xX + zZ), yZ - wX ],
+            [ xZ - wY, yZ + wX, 1.0 - (xX + yY) ]])
 
-def get_elevation_azimuth_from_orientations_applied_to_reference_vector(orientations, u = np.array([[1, 0, 0]]).T):
-    x = np.zeros((orientations.shape[0],))
-    y = np.zeros((orientations.shape[0],))
+def get_azimuth_elevation_from_orientations_applied_to_reference_vector(orientations, orientation_ref_vector = np.array([[1, 0, 0]]).T):
+    n_orientations = orientations.shape[0]
+    azimuth_angles = np.zeros((n_orientations,))
+    elevation_angles = np.zeros((n_orientations,))
     
     for orientation_idx, orientation in enumerate(orientations):
-        R = quat2mat(orientation)
-        Ru = np.matmul(R, u)
-        azimuth, elevation = azimuth_elevation_representation(Ru)
-        x[orientation_idx] = azimuth
-        y[orientation_idx] = elevation
+        rotation_matrix_3d = quat2mat(orientation)
+        rotated_orientation_ref_vector = np.matmul(rotation_matrix_3d, orientation_ref_vector)
+        azimuth, elevation = azimuth_elevation_representation(rotated_orientation_ref_vector)
+        
+        azimuth_angles[orientation_idx] = azimuth
+        elevation_angles[orientation_idx] = elevation
     
-    return x, y
+    return azimuth_angles, elevation_angles
 
 """
 Functions for coloring points in the scatter plot according to rotation angle
@@ -136,7 +153,7 @@ def get_color(x, color_bar_palette, vmin, vmax):
 
 def get_colors_from_rotation_angles(rotation_angles, color_bar_palette=bokeh.palettes.plasma(256)):
     color_bar_vmin = 0.0
-    color_bar_vmax = 2*np.pi
+    color_bar_vmax = 2 * np.pi
         
     colors = []
     for rotation_angle in rotation_angles:
@@ -150,9 +167,8 @@ def get_colors_from_rotation_angles(rotation_angles, color_bar_palette=bokeh.pal
 Function for displaying real-space XY projection plot using quaternions and atomic coordinates
 """
 
-def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coordinates, attributes=['x', 'y']):
-    "Build a suitable CustomJS to display the current event in the real2d_plot scatter plot."
-    return CustomJS(args=dict(real2d=real2d, x=x, y=y, quaternions=quaternions, atomic_coordinates=atomic_coordinates), code="""
+def display_real2d_plot_using_orientations(orientations, real2d_plot_data_source, ref_vector_azimuth, ref_vector_elevation, atomic_coordinates):
+    return CustomJS(args=dict(orientations=orientations, real2d_plot_data_source=real2d_plot_data_source, ref_vector_azimuth=ref_vector_azimuth, ref_vector_elevation=ref_vector_elevation, atomic_coordinates=atomic_coordinates), code="""
         // Adapted from:
         // 1. https://stackoverflow.com/questions/27205018/multiply-2-matrices-in-javascript
         // 2. https://en.wikipedia.org/wiki/Transpose
@@ -212,25 +228,17 @@ def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coor
                     [ xZ-wY, yZ+wX, 1.0-(xX+yY) ]];
         }   
     
-        var attrs = %s; var args = []; var n = x.length;
-        
-        var test_x;
-        var test_y;
-        for (var i = 0; i < attrs.length; i++) {
-            if (attrs[i] == 'x') {
-                test_x = Number(cb_obj[attrs[i]]);
-            }
-            
-            if (attrs[i] == 'y') {
-                test_y = Number(cb_obj[attrs[i]]);
-            }
-        }
+        // Get the mouse position on the scatter plot
+        var mouse_x = Number(cb_obj['x']);
+        var mouse_y = Number(cb_obj['y']);
     
+        // Find the index of the data point that is closest to the mouse position on the scatter plot
         var minDiffIndex = -1;
         var minDiff = 99999;
+        var n = ref_vector_azimuth.length;
         var squareDiff;
         for (var i = 0; i < n; i++) {
-            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            squareDiff = (mouse_x - ref_vector_azimuth[i]) ** 2 + (mouse_y - ref_vector_elevation[i]) ** 2;
             if (squareDiff < minDiff) {
                 minDiff = squareDiff;
                 minDiffIndex = i;
@@ -238,11 +246,11 @@ def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coor
         }
                 
         if (minDiffIndex > -1) {
-            // identify the quaternion that corresponds to the nearest (azimuth, elevation) point
-            var quaternion = quaternions[minDiffIndex];
+            // identify the orientation that corresponds to the nearest (azimuth, elevation) point
+            var orientation = orientations[minDiffIndex];
             
-            // compute the rotation matrix that corresponds to the quaternion
-            var rotation_matrix = quat2mat(quaternion);
+            // compute the rotation matrix that corresponds to the orientation
+            var rotation_matrix = quat2mat(orientation);
 
             // rotate atomic_coordinates using rotation_matrix
             // Adapted from: /reg/neh/home/dujardin/pysingfel/examples/scripts/gui.py
@@ -250,11 +258,11 @@ def display_real2d_plot_using_quaternions(real2d, x, y, quaternions, atomic_coor
 
             // scatter plot the rotated_atomic_coordinates
             // Adapted from: /reg/neh/home/dujardin/pysingfel/examples/scripts/gui.py
-            real2d.data['x'] = rotated_atomic_coordinates[1]; // x-axis represents the y-coordinate
-            real2d.data['y'] = rotated_atomic_coordinates[0]; // y-axis represents the x-coordinate
-            real2d.change.emit();
+            real2d_plot_data_source.data['x'] = rotated_atomic_coordinates[1]; // x-axis represents the y-coordinate
+            real2d_plot_data_source.data['y'] = rotated_atomic_coordinates[0]; // y-axis represents the x-coordinate
+            real2d_plot_data_source.change.emit();
         }
-    """ % (attributes)) 
+    """)
 
 """
 Function for generating PNG image byte strings
@@ -281,93 +289,128 @@ def get_images(data):
     return images
 
 """
-Function for displaying image plot using PNG image byte strings
+Functions for displaying image plots
 """
 
-def display_image_plot(div, x, y, static_images, image_brightness, attributes=['x', 'y'], style = 'font-size:20px;text-align:center'):
-    "Build a suitable CustomJS to display the current event in the div model."
-    return CustomJS(args=dict(div=div, x=x, y=y, static_images=static_images, image_brightness=image_brightness), code="""
-        var attrs = %s; var args = []; var n = x.length;
-        
-        var test_x;
-        var test_y;
-        for (var i = 0; i < attrs.length; i++) {
-            if (attrs[i] == 'x') {
-                test_x = Number(cb_obj[attrs[i]]);
-            }
-            
-            if (attrs[i] == 'y') {
-                test_y = Number(cb_obj[attrs[i]]);
-            }
-        }
+def display_image_plot(image_plot_div, latent_variable_1, latent_variable_2, static_images, image_plot_image_brightness, image_plot_index_label_text_style = 'font-size:20px;text-align:center'):
+    return CustomJS(args=dict(image_plot_div=image_plot_div, latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, static_images=static_images, image_plot_image_brightness=image_plot_image_brightness), code="""
+        // Get the mouse position on the scatter plot
+        var mouse_x = Number(cb_obj['x']);
+        var mouse_y = Number(cb_obj['y']);
     
+        // Find the index of the data point that is closest to the mouse position on the scatter plot
         var minDiffIndex = -1;
         var minDiff = 99999;
+        var n = latent_variable_1.length;
         var squareDiff;
         for (var i = 0; i < n; i++) {
-            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            squareDiff = (mouse_x - latent_variable_1[i]) ** 2 + (mouse_y - latent_variable_2[i]) ** 2;
             if (squareDiff < minDiff) {
                 minDiff = squareDiff;
                 minDiffIndex = i;
             }
         }
         
-        var img_tag_attrs = "style='filter: brightness(" + image_brightness + ");'";
-        var img_tag = "<div><img src='" + static_images[minDiffIndex] + "' " + img_tag_attrs + "></img></div>";
-        //var line = img_tag + "\\n";
-        var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
-        div.text = "";
-        var text = div.text.concat(line);
-        var lines = text.split("\\n")
-        if (lines.length > 35)
-            lines.shift();
-        div.text = lines.join("\\n");
-    """ % (attributes, style))
-
-"""
-Function for displaying image plot using images loaded from SLAC PSWWW
-"""
-
-def display_image_plot_on_slac_pswww(div, x, y, slac_username, slac_dataset_name, image_brightness, attributes=['x', 'y'], style='font-size:20px;text-align:center'):
-    "Build a suitable CustomJS to display the current event in the div model."
-    return CustomJS(args=dict(div=div, x=x, y=y, slac_username=slac_username, slac_dataset_name=slac_dataset_name, image_brightness=image_brightness), code="""
-        var attrs = %s; var args = []; var n = x.length;
-        
-        var test_x;
-        var test_y;
-        for (var i = 0; i < attrs.length; i++) {
-            if (attrs[i] == 'x') {
-                test_x = Number(cb_obj[attrs[i]]);
-            }
+        if (minDiffIndex > -1) {    
+            // Identify the image source
+            var img_src = static_images[minDiffIndex];
             
-            if (attrs[i] == 'y') {
-                test_y = Number(cb_obj[attrs[i]]);
-            }
+            // Style the image
+            var img_tag_attrs = "style='filter: brightness(" + image_plot_image_brightness + "); transform: scaleY(-1);'";
+
+            // Create the image
+            var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
+
+            // Create the image index label text
+            var img_idx_label_text = "<p style=%r>" + (minDiffIndex + 1) + "</p>";
+
+            // Create the image plot contents
+            var img_plot_contents = img_tag + img_idx_label_text;
+
+            // Display the image plot contents in the image plot div
+            image_plot_div.text = img_plot_contents;
         }
+    """ % (image_plot_index_label_text_style))
+
+def display_image_plot_on_slac_pswww(image_plot_div, latent_variable_1, latent_variable_2, image_plot_slac_username, image_plot_slac_dataset_name, image_plot_image_brightness, image_plot_index_label_text_style='font-size:20px;text-align:center'):
+    return CustomJS(args=dict(image_plot_div=image_plot_div, latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, image_plot_slac_username=image_plot_slac_username, image_plot_slac_dataset_name=image_plot_slac_dataset_name, image_plot_image_brightness=image_plot_image_brightness), code="""        
+        // Get the mouse position on the scatter plot
+        var mouse_x = Number(cb_obj['x']);
+        var mouse_y = Number(cb_obj['y']);
     
+        // Find the index of the data point that is closest to the mouse position on the scatter plot
         var minDiffIndex = -1;
         var minDiff = 99999;
+        var n = latent_variable_1.length;
         var squareDiff;
         for (var i = 0; i < n; i++) {
-            squareDiff = (test_x - x[i]) ** 2 + (test_y - y[i]) ** 2;
+            squareDiff = (mouse_x - latent_variable_1[i]) ** 2 + (mouse_y - latent_variable_2[i]) ** 2;
             if (squareDiff < minDiff) {
                 minDiff = squareDiff;
                 minDiffIndex = i;
             }
         }
-                
-        var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + slac_username + "/files/" + slac_dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
-        var img_tag_attrs = "style='filter: brightness(" + image_brightness + "); transform: scaleY(-1);'";
-        var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
-        //var line = img_tag + "\\n";
-        var line = img_tag + "<p style=%r>" + (minDiffIndex+1) + "</p>" + "\\n";
-        div.text = "";
-        var text = div.text.concat(line);
-        var lines = text.split("\\n")
-        if (lines.length > 35)
-            lines.shift();
-        div.text = lines.join("\\n");
-    """ % (attributes, style))
+        
+        if (minDiffIndex > -1) {       
+            // Identify the image source
+            var img_src = "https://pswww.slac.stanford.edu/jupyterhub/user/" + image_plot_slac_username + "/files/" + image_plot_slac_dataset_name + "/images/diffraction-pattern-" + minDiffIndex + ".png";
+            
+            // Style the image
+            var img_tag_attrs = "style='filter: brightness(" + image_plot_image_brightness + "); transform: scaleY(-1);'";
+
+            // Create the image
+            var img_tag = "<div><img src='" + img_src + "' " + img_tag_attrs + "></img></div>";
+
+            // Create the image index label text
+            var img_idx_label_text = "<p style=%r>" + (minDiffIndex + 1) + "</p>";
+
+            // Create the image plot contents
+            var img_plot_contents = img_tag + img_idx_label_text;
+
+            // Display the image plot contents in the image plot div
+            image_plot_div.text = img_plot_contents;
+        }
+    """ % (image_plot_index_label_text_style))
+
+def display_image_plot_using_image_source_location(image_plot_image_source_location, image_plot_div, latent_variable_1, latent_variable_2, image_plot_image_brightness, image_plot_index_label_text_font_size, image_plot_slac_username=None, image_plot_slac_dataset_name=None, dataset_file=None, image_type=None):
+    # Determine where to load images from
+    if image_plot_image_source_location == "slac-pswww":
+        if image_plot_slac_username is None:
+            raise Exception("Please provide: slac_username")
+
+        if image_plot_slac_dataset_name is None:
+            raise Exception("Please provide: slac_dataset_name")
+
+        # Directly display images from SLAC PSWWW
+        display_image_plot_fn = display_image_plot_on_slac_pswww(image_plot_div, 
+                                                        latent_variable_1, 
+                                                        latent_variable_2, 
+                                                        image_plot_slac_username, 
+                                                        image_plot_slac_dataset_name, 
+                                                        image_plot_image_brightness, 
+                                                        image_plot_index_label_text_style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))    
+    elif image_plot_image_source_location is None:
+        # Load images from HDF5 file
+        with h5.File(dataset_file, "r") as dataset_file_handle:
+            images = dataset_file_handle[image_type][:]
+
+        # Convert loaded images to PNG image byte strings
+        tic = time.time()
+        static_images = get_images(images)
+        toc = time.time()
+        print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
+
+        # Display PNG image byte strings generated from image arrays in HDF5 file
+        display_image_plot_fn = display_image_plot(image_plot_div, 
+                                                    latent_variable_1, 
+                                                    latent_variable_2,
+                                                    static_images,
+                                                    image_plot_image_brightness, 
+                                                    image_plot_index_label_text_style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))
+    else:
+        raise Exception("Unknown image source location.")
+    
+    return display_image_plot_fn
 
 """
 Function for displaying Bokeh plots in Jupyter notebook
@@ -465,10 +508,10 @@ def visualize_orientations(
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
 
     # Quaternion -> 3D rotation matrix -> apply to reference vector -> (azimuth, elevation)
-    ref_vector_azimuth, ref_vector_elevation = get_elevation_azimuth_from_orientations_applied_to_reference_vector(orientations, u = np.array([scatter_plot_ref_vector_as_a_list]).T)
+    ref_vector_azimuth, ref_vector_elevation = get_azimuth_elevation_from_orientations_applied_to_reference_vector(orientations, orientation_ref_vector = np.array([scatter_plot_ref_vector_as_a_list]).T)
 
     # Quaternion -> angle-axis -> (azimuth, elevation), rotation angle about axis
-    azimuth, elevation, rotation_angles = get_elevation_azimuth_rotation_angles_from_orientations(orientations)    
+    azimuth, elevation, rotation_angles = get_azimuth_elevation_rotation_angles_from_orientations(orientations)    
 
     # Use rotation_angles to color the points on the scatter plots
     scatter_plot_colors, color_bar_color_mapper = get_colors_from_rotation_angles(rotation_angles)
@@ -523,46 +566,17 @@ def visualize_orientations(
     # Build layout for plots
     layout = row(real2d_plot, scatter_plot, color_bar_plot, image_plot_div)
 
-    # Add interactivity to the scatter plot
-    
-    # Determine where to load images from
-    if image_plot_image_source_location == "slac-pswww":
-        if image_plot_slac_username is None:
-            raise Exception("Please provide: slac_username")
-
-        if image_plot_slac_dataset_name is None:
-            raise Exception("Please provide: slac_dataset_name")
-
-        # Directly display images from SLAC PSWWW
-        display_image_plot_fn = display_image_plot_on_slac_pswww(image_plot_div, 
+    # Display the corresponding image when mouse is near a point in scatter plot
+    display_image_plot_fn = display_image_plot_using_image_source_location(image_plot_image_source_location, 
+                                                        image_plot_div, 
                                                         ref_vector_azimuth, 
                                                         ref_vector_elevation, 
-                                                        image_plot_slac_username, 
-                                                        image_plot_slac_dataset_name, 
                                                         image_plot_image_brightness, 
-                                                        style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))    
-    elif image_plot_image_source_location is None:
-        # Load images from HDF5 file
-        with h5.File(dataset_file, "r") as dataset_file_handle:
-            images = dataset_file_handle[image_type][:]
-
-        # Convert loaded images to PNG image byte strings
-        tic = time.time()
-        static_images = get_images(images)
-        toc = time.time()
-        print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
-
-        # Display PNG image byte strings generated from image arrays in HDF5 file
-        display_image_plot_fn = display_image_plot(image_plot_div, 
-                                                    ref_vector_azimuth, 
-                                                    ref_vector_elevation,
-                                                    static_images,
-                                                    image_plot_image_brightness, 
-                                                    style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))
-    else:
-        raise Exception("Unknown image source location.")
-
-    # Display the corresponding image when mouse is near a point in scatter plot
+                                                        image_plot_index_label_text_font_size, 
+                                                        image_plot_slac_username=image_plot_slac_username, 
+                                                        image_plot_slac_dataset_name=image_plot_slac_dataset_name, 
+                                                        dataset_file=dataset_file, 
+                                                        image_type=image_type)
     scatter_plot.js_on_event(events.MouseMove, display_image_plot_fn)
     
     # To prevent a lag when displaying particles with several atoms, randomly select particle_random_sample_size atoms
@@ -572,11 +586,11 @@ def visualize_orientations(
     atomic_coordinates_random_sample = atomic_coordinates[particle_atoms_random_sample_idx]
     
     # Display real-space XY projection of particle when mouse is near a point in scatter plot
-    display_real2d_plot_fn = display_real2d_plot_using_quaternions(real2d_plot_data_source, 
-                                            ref_vector_azimuth, 
-                                            ref_vector_elevation, 
-                                            orientations, 
-                                            atomic_coordinates_random_sample)
+    display_real2d_plot_fn = display_real2d_plot_using_orientations(orientations, 
+                                                real2d_plot_data_source, 
+                                                ref_vector_azimuth, 
+                                                ref_vector_elevation, 
+                                                atomic_coordinates_random_sample)
     scatter_plot.js_on_event(events.MouseMove, display_real2d_plot_fn)
 
     # Display the plots
@@ -644,12 +658,12 @@ def visualize_latent_space(
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
 
     # Data source for the scatter plot
-    x = latent_vectors[:, latent_idx_1]
-    y = latent_vectors[:, latent_idx_2] 
-    scatter_plot_data_source = ColumnDataSource(data=dict(x=x, y=y))
+    latent_variable_1 = latent_vectors[:, latent_idx_1]
+    latent_variable_2 = latent_vectors[:, latent_idx_2] 
+    scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
 
     # Populate the scatter plot
-    scatter_plot.scatter('x', 'y', source=scatter_plot_data_source, fill_alpha=0.6)
+    scatter_plot.scatter('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6)
 
     # Add axis labels
     if latent_method == "principal_component_analysis":
@@ -673,46 +687,17 @@ def visualize_latent_space(
     # Build the layout for plots
     layout = row(scatter_plot, image_plot_div)
 
-    # Add interactivity to the scatter plot
-    
-    # Determine where to load images from
-    if image_plot_image_source_location == "slac-pswww":
-        if image_plot_slac_username is None:
-            raise Exception("Please provide: slac_username")
-
-        if image_plot_slac_dataset_name is None:
-            raise Exception("Please provide: slac_dataset_name")
-
-        # Directly display images from SLAC PSWWW
-        display_image_plot_fn = display_image_plot_on_slac_pswww(image_plot_div, 
-                                                        x, 
-                                                        y, 
-                                                        image_plot_slac_username, 
-                                                        image_plot_slac_dataset_name, 
-                                                        image_plot_image_brightness, 
-                                                        style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))    
-    elif image_plot_image_source_location is None:
-        # Load images from HDF5 file
-        with h5.File(dataset_file, "r") as dataset_file_handle:
-            images = dataset_file_handle[image_type][:]
-
-        # Convert loaded images to PNG image byte strings
-        tic = time.time()
-        static_images = get_images(images)
-        toc = time.time()
-        print("It takes {:.2f} seconds to generate static images in memory.".format(toc-tic))
-
-        # Display PNG image byte strings generated from image arrays in HDF5 file
-        display_image_plot_fn = display_image_plot(image_plot_div, 
-                                                    x, 
-                                                    y,
-                                                    static_images,
-                                                    image_plot_image_brightness, 
-                                                    style='font-size:{};text-align:center'.format(image_plot_index_label_text_font_size))
-    else:
-        raise Exception("Unknown image source location.")
-
     # Display the corresponding image when mouse is near a point in scatter plot
+    display_image_plot_fn = display_image_plot_using_image_source_location(image_plot_image_source_location, 
+                                                        image_plot_div, 
+                                                        latent_variable_1, 
+                                                        latent_variable_2, 
+                                                        image_plot_image_brightness, 
+                                                        image_plot_index_label_text_font_size, 
+                                                        image_plot_slac_username=image_plot_slac_username, 
+                                                        image_plot_slac_dataset_name=image_plot_slac_dataset_name, 
+                                                        dataset_file=dataset_file, 
+                                                        image_type=image_type)
     scatter_plot.js_on_event(events.MouseMove, display_image_plot_fn)
 
     # Display the plots
