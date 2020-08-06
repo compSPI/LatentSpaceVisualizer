@@ -676,6 +676,9 @@ def visualize_latent_space(
     elif latent_method == "incremental_principal_component_analysis":
         scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
         scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+    elif latent_method == "ensemble_pca":
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
     
