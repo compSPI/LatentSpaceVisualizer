@@ -642,10 +642,10 @@ def visualize_latent_space(
     
     # Load data from the HDF5 file
     tic = time.time()
-    with h5.File(dataset_file, "r") as dataset_file_handle:
-        latent_vectors = dataset_file_handle[latent_method][:]
-        print(latent_vectors.shape)
-
+    with h5.File(dataset_file, "r") as dataset_file_handle:        
+        latent_variable_1 = dataset_file_handle[latent_method][:, latent_idx_1 - 1]
+        latent_variable_2 = dataset_file_handle[latent_method][:, latent_idx_2 - 1] 
+        
         # unclear on how to plot targets
         # labels = np.zeros(len(images)) 
 
@@ -659,8 +659,6 @@ def visualize_latent_space(
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
 
     # Data source for the scatter plot
-    latent_variable_1 = latent_vectors[:, latent_idx_1]
-    latent_variable_2 = latent_vectors[:, latent_idx_2] 
     scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
 
     # Populate the scatter plot
