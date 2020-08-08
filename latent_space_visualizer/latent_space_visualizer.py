@@ -642,9 +642,10 @@ def visualize_latent_space(
     
     # Load data from the HDF5 file
     tic = time.time()
-    with h5.File(dataset_file, "r") as dataset_file_handle:
-        latent_vectors = dataset_file_handle[latent_method][:]
-
+    with h5.File(dataset_file, "r") as dataset_file_handle:        
+        latent_variable_1 = dataset_file_handle[latent_method][:, latent_idx_1 - 1]
+        latent_variable_2 = dataset_file_handle[latent_method][:, latent_idx_2 - 1] 
+        
         # unclear on how to plot targets
         # labels = np.zeros(len(images)) 
 
@@ -658,8 +659,6 @@ def visualize_latent_space(
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
 
     # Data source for the scatter plot
-    latent_variable_1 = latent_vectors[:, latent_idx_1]
-    latent_variable_2 = latent_vectors[:, latent_idx_2] 
     scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
 
     # Populate the scatter plot
@@ -672,6 +671,12 @@ def visualize_latent_space(
     elif latent_method == "diffusion_map":          
         scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
         scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
+    elif latent_method == "incremental_principal_component_analysis":
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+    elif latent_method == "ensemble_pca":
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
     
