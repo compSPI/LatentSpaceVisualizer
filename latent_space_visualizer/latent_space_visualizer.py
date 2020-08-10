@@ -147,21 +147,25 @@ def get_azimuth_elevation_from_orientations_applied_to_reference_vector(orientat
 Functions for coloring points in the scatter plot according to rotation angle
 """
 
-def get_color(x, color_bar_palette, vmin, vmax):
+def get_color_from_continuous_value(x, color_bar_palette, vmin, vmax):
     n = len(color_bar_palette)
     return color_bar_palette[int((x - vmin) / (vmax - vmin) * n)]
 
-def get_colors_from_rotation_angles(rotation_angles, color_bar_palette=bokeh.palettes.plasma(256)):
-    color_bar_vmin = 0.0
-    color_bar_vmax = 2 * np.pi
-        
+def get_colors_from_continuous_values(data, color_bar_palette, color_bar_vmin, color_bar_vmax): 
     colors = []
-    for rotation_angle in rotation_angles:
-        color = get_color(rotation_angle, color_bar_palette, color_bar_vmin, color_bar_vmax)
+    for data_point in data:
+        color = get_color_from_continuous_value(data_point, color_bar_palette, color_bar_vmin, color_bar_vmax)
         colors.append(color)
     
-    color_mapper = LinearColorMapper(palette=color_bar_palette, low=color_bar_vmin, high=color_bar_vmax)
-    return colors, color_mapper
+    return colors
+
+def get_colors_from_discrete_values(data, color_bar_palette):
+    colors = []
+    for data_point in data:
+        color = color_bar_palette[data_point]
+        colors.append(color)
+        
+    return colors
 
 """
 Function for displaying real-space XY projection plot using quaternions and atomic coordinates
@@ -514,7 +518,11 @@ def visualize_orientations(
     azimuth, elevation, rotation_angles = get_azimuth_elevation_rotation_angles_from_orientations(orientations)    
 
     # Use rotation_angles to color the points on the scatter plots
-    scatter_plot_colors, color_bar_color_mapper = get_colors_from_rotation_angles(rotation_angles)
+    color_palette = bokeh.palettes.plasma(256)
+    color_vmin = 0.0
+    color_vmax = 2 * np.pi
+    scatter_plot_colors = get_colors_from_continuous_values(rotation_angles, color_palette, color_vmin, color_vmax)
+    color_bar_color_mapper = LinearColorMapper(palette=color_palette, low=color_vmin, high=color_vmax)
     
     # Data source for the scatter plot
     scatter_plot_data_source = ColumnDataSource(data=dict(
@@ -646,11 +654,15 @@ def visualize_latent_space(
         latent_variable_1 = dataset_file_handle[latent_method][:, latent_idx_1 - 1]
         latent_variable_2 = dataset_file_handle[latent_method][:, latent_idx_2 - 1] 
         
+        # Load the training set mask from the HDF5 file
+        training_set_mask_key = "training_set_mask"
+        training_set_mask = dataset_file_handle[training_set_mask_key][:].astype(np.bool)
+        
         # unclear on how to plot targets
-        # labels = np.zeros(len(images)) 
+        # labels = np.zeros(len(images))
 
     toc = time.time()
-    print("It takes {:.2f} seconds to load the latent vectors and metadata from the HDF5 file.".format(toc-tic))
+    print("It takes {:.2f} seconds to load the {} latent vectors and metadata from the HDF5 file.".format(toc-tic, len(latent_variable_1)))
     
     # unclear on how to plot targets
     # n_labels = len(np.unique(labels))
@@ -658,25 +670,36 @@ def visualize_latent_space(
     # Scatter plot for the latent vectors
     scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
 
+    # Color the points in the scatter plot according to the training set mask    
+    scatter_plot_colors = get_colors_from_discrete_values(training_set_mask, bokeh.palettes.Set1[3][:2])
+        
+    # Define the legend
+    data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+    data_point_type[training_set_mask] = "Train"
+    data_point_type[np.invert(training_set_mask)] = "Test"
+        
     # Data source for the scatter plot
-    scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+    scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
 
     # Populate the scatter plot
-    scatter_plot.scatter('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6)
+    scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
 
     # Add axis labels
     if latent_method == "principal_component_analysis":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     elif latent_method == "diffusion_map":          
-        scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2)
     elif latent_method == "incremental_principal_component_analysis":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     elif latent_method == "ensemble_pca":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
+    elif latent_method == "ensemble_pca_mpi":
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
     
