@@ -7,7 +7,7 @@ import bokeh.io
 from bokeh.io import output_notebook
 from bokeh.io import show
 from bokeh.layouts import row
-from bokeh.models import CustomJS, Div, LinearColorMapper, ColorBar, Range1d
+from bokeh.models import CustomJS, Div, LinearColorMapper, ColorBar, Range1d, HoverTool
 
 from bokeh.plotting import ColumnDataSource
 import bokeh.palettes
@@ -607,7 +607,6 @@ def visualize_orientations(
     toc = time.time()
     print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
 
-
 def visualize_latent_space(
     dataset_file, 
     image_type, 
@@ -620,7 +619,7 @@ def visualize_latent_space(
     scatter_plot_y_axis_label_text_font_size='15pt', 
     scatter_plot_color_bar_height = 400,
     scatter_plot_color_bar_width = 120,
-    scatter_plot_color_points = False,
+    scatter_plot_type = "hexbin",
     image_plot_image_size_scale_factor = 0.9,
     image_plot_image_brightness=1.0,
     image_plot_image_source_location=None, 
@@ -655,7 +654,7 @@ def visualize_latent_space(
         latent_variable_1 = dataset_file_handle[latent_method][:, latent_idx_1 - 1]
         latent_variable_2 = dataset_file_handle[latent_method][:, latent_idx_2 - 1] 
         
-        if scatter_plot_color_points:
+        if scatter_plot_type == "colored_by_training_mask":
             # Load the training set mask from the HDF5 file
             training_set_mask_key = "training_set_mask"
             training_set_mask = dataset_file_handle[training_set_mask_key][:].astype(np.bool)
@@ -670,14 +669,34 @@ def visualize_latent_space(
     # n_labels = len(np.unique(labels))
     
     # Scatter plot for the latent vectors
-    scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+    scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
 
-    if scatter_plot_color_points:
+    if scatter_plot_type == "hexbin":
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, color='white', size=0.1)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+    
+    elif scatter_plot_type == "colored_by_training_mask":
         
         # Color the points in the scatter plot according to the training set mask    
         scatter_plot_colors = get_colors_from_discrete_values(training_set_mask, bokeh.palettes.Set1[3][:2])
 
-        # Define the legend
+        # Define the legend 
         data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
         data_point_type[training_set_mask] = "Train"
         data_point_type[np.invert(training_set_mask)] = "Test"
@@ -686,13 +705,15 @@ def visualize_latent_space(
         scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
 
         # Populate the scatter plot
+        # Adapted from: https://stackoverflow.com/questions/50083062/how-to-add-legend-inside-pythons-bokeh-circle-plot
         scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
+    
     else:
         # Data source for the scatter plot
         scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
-
+        
         # Populate the scatter plot
-        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)        
 
     # Add axis labels
     if latent_method == "principal_component_analysis":
