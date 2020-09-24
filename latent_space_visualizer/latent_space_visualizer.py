@@ -7,7 +7,7 @@ import bokeh.io
 from bokeh.io import output_notebook
 from bokeh.io import show
 from bokeh.layouts import row
-from bokeh.models import CustomJS, Div, LinearColorMapper, ColorBar, Range1d
+from bokeh.models import CustomJS, Div, LinearColorMapper, ColorBar, Range1d, HoverTool
 
 from bokeh.plotting import ColumnDataSource
 import bokeh.palettes
@@ -147,21 +147,25 @@ def get_azimuth_elevation_from_orientations_applied_to_reference_vector(orientat
 Functions for coloring points in the scatter plot according to rotation angle
 """
 
-def get_color(x, color_bar_palette, vmin, vmax):
+def get_color_from_continuous_value(x, color_bar_palette, vmin, vmax):
     n = len(color_bar_palette)
     return color_bar_palette[int((x - vmin) / (vmax - vmin) * n)]
 
-def get_colors_from_rotation_angles(rotation_angles, color_bar_palette=bokeh.palettes.plasma(256)):
-    color_bar_vmin = 0.0
-    color_bar_vmax = 2 * np.pi
-        
+def get_colors_from_continuous_values(data, color_bar_palette, color_bar_vmin, color_bar_vmax): 
     colors = []
-    for rotation_angle in rotation_angles:
-        color = get_color(rotation_angle, color_bar_palette, color_bar_vmin, color_bar_vmax)
+    for data_point in data:
+        color = get_color_from_continuous_value(data_point, color_bar_palette, color_bar_vmin, color_bar_vmax)
         colors.append(color)
     
-    color_mapper = LinearColorMapper(palette=color_bar_palette, low=color_bar_vmin, high=color_bar_vmax)
-    return colors, color_mapper
+    return colors
+
+def get_colors_from_discrete_values(data, color_bar_palette):
+    colors = []
+    for data_point in data:
+        color = color_bar_palette[data_point]
+        colors.append(color)
+        
+    return colors
 
 """
 Function for displaying real-space XY projection plot using quaternions and atomic coordinates
@@ -514,7 +518,11 @@ def visualize_orientations(
     azimuth, elevation, rotation_angles = get_azimuth_elevation_rotation_angles_from_orientations(orientations)    
 
     # Use rotation_angles to color the points on the scatter plots
-    scatter_plot_colors, color_bar_color_mapper = get_colors_from_rotation_angles(rotation_angles)
+    color_palette = bokeh.palettes.plasma(256)
+    color_vmin = 0.0
+    color_vmax = 2 * np.pi
+    scatter_plot_colors = get_colors_from_continuous_values(rotation_angles, color_palette, color_vmin, color_vmax)
+    color_bar_color_mapper = LinearColorMapper(palette=color_palette, low=color_vmin, high=color_vmax)
     
     # Data source for the scatter plot
     scatter_plot_data_source = ColumnDataSource(data=dict(
@@ -599,7 +607,6 @@ def visualize_orientations(
     toc = time.time()
     print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
 
-
 def visualize_latent_space(
     dataset_file, 
     image_type, 
@@ -612,6 +619,7 @@ def visualize_latent_space(
     scatter_plot_y_axis_label_text_font_size='15pt', 
     scatter_plot_color_bar_height = 400,
     scatter_plot_color_bar_width = 120,
+    scatter_plot_type = "hexbin",
     image_plot_image_size_scale_factor = 0.9,
     image_plot_image_brightness=1.0,
     image_plot_image_source_location=None, 
@@ -646,39 +654,560 @@ def visualize_latent_space(
         latent_variable_1 = dataset_file_handle[latent_method][:, latent_idx_1 - 1]
         latent_variable_2 = dataset_file_handle[latent_method][:, latent_idx_2 - 1] 
         
+        if scatter_plot_type == "hexbin_colored_by_single_hit_flag":
+            # Load the single-hit mask from the HDF5 file
+            single_hit_mask_key = "single_hit_mask"
+            single_hit_mask = dataset_file_handle[single_hit_mask_key][:].astype(np.bool)
+        
+        elif scatter_plot_type == "colored_by_training_mask":
+            # Load the training set mask from the HDF5 file
+            training_set_mask_key = "training_set_mask"
+            training_set_mask = dataset_file_handle[training_set_mask_key][:].astype(np.bool)
+
         # unclear on how to plot targets
-        # labels = np.zeros(len(images)) 
+        # labels = np.zeros(len(images))
 
     toc = time.time()
-    print("It takes {:.2f} seconds to load the latent vectors and metadata from the HDF5 file.".format(toc-tic))
+    print("It takes {:.2f} seconds to load the {} latent vectors and metadata from the HDF5 file.".format(toc-tic, len(latent_variable_1)))
     
     # unclear on how to plot targets
     # n_labels = len(np.unique(labels))
     
     # Scatter plot for the latent vectors
-    scatter_plot = figure(width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+    scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
 
-    # Data source for the scatter plot
-    scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+    if scatter_plot_type == "hexbin":
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
 
-    # Populate the scatter plot
-    scatter_plot.scatter('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6)
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, color='white', size=0.1)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+    
+    elif scatter_plot_type == "hexbin_colored_by_single_hit_flag":
+        # Color the points in the scatter plot according to the single-hit mask
+        scatter_plot_colors = get_colors_from_discrete_values(single_hit_mask, bokeh.palettes.Set1[3][:2])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[single_hit_mask] = "Single-hit"
+        data_point_type[np.invert(single_hit_mask)] = "Outlier"
+
+#         # Data source for the scatter plot
+#         scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+        
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None,  size=0.5)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+    
+    elif scatter_plot_type == "colored_by_training_mask":
+        
+        # Color the points in the scatter plot according to the training set mask    
+        scatter_plot_colors = get_colors_from_discrete_values(training_set_mask, bokeh.palettes.Set1[3][:2])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[training_set_mask] = "Train"
+        data_point_type[np.invert(training_set_mask)] = "Test"
+
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Populate the scatter plot
+        # Adapted from: https://stackoverflow.com/questions/50083062/how-to-add-legend-inside-pythons-bokeh-circle-plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
+    
+    else:
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+        
+        # Populate the scatter plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)        
 
     # Add axis labels
     if latent_method == "principal_component_analysis":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     elif latent_method == "diffusion_map":          
-        scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "DC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "DC {}".format(latent_idx_2)
     elif latent_method == "incremental_principal_component_analysis":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     elif latent_method == "ensemble_pca":
-        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1 + 1)
-        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2 + 1)
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
+    elif latent_method == "ensemble_pca_mpi":
+        scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+        scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     else:
         raise Exception("Unrecognized latent method. Please choose from: principal_component_analysis, diffusion_map")
+    
+    # Change the axis label font size
+    scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
+    scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
+
+    # Container to display the static_images
+    div_width = int(figure_width * image_plot_image_size_scale_factor)
+    div_height = int(figure_height * image_plot_image_size_scale_factor)
+    image_plot_div = Div(width=div_width, height=div_height)
+
+    # Build the layout for plots
+    layout = row(scatter_plot, image_plot_div)
+
+    # Display the corresponding image when mouse is near a point in scatter plot
+    display_image_plot_fn = display_image_plot_using_image_source_location(image_plot_image_source_location, 
+                                                        image_plot_div, 
+                                                        latent_variable_1, 
+                                                        latent_variable_2, 
+                                                        image_plot_image_brightness, 
+                                                        image_plot_index_label_text_font_size, 
+                                                        image_plot_slac_username=image_plot_slac_username, 
+                                                        image_plot_slac_dataset_name=image_plot_slac_dataset_name, 
+                                                        dataset_file=dataset_file, 
+                                                        image_type=image_type)
+    scatter_plot.js_on_event(events.MouseMove, display_image_plot_fn)
+
+    # Display the plots
+    tic = time.time()
+    show(layout)
+    toc = time.time()
+    print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
+
+def visualize_latent_space_for_incremental_principal_component_analysis(
+    dataset_file,
+    latent_space_file,
+    image_type, 
+    latent_idx_1=0, 
+    latent_idx_2=1,
+    figure_height = 450, 
+    figure_width = 450, 
+    scatter_plot_x_axis_label_text_font_size='15pt',
+    scatter_plot_y_axis_label_text_font_size='15pt', 
+    scatter_plot_color_bar_height = 400,
+    scatter_plot_color_bar_width = 120,
+    scatter_plot_type = "hexbin",
+    image_plot_image_size_scale_factor = 0.9,
+    image_plot_image_brightness=1.0,
+    image_plot_image_source_location=None, 
+    image_plot_slac_username=None,
+    image_plot_slac_dataset_name=None,
+    image_plot_index_label_text_font_size='20px'
+    ):
+    
+    """
+    Visualize the latent space from an HDF5 file
+    
+    :param dataset_file: The path to the HDF5 file, as a str
+    :param latent_space_file: The path to the HDF5 file containing the latent space built by incremental_principal_component_analysis, as a str
+    :param image_type: A key in the HDF5 file that represents the type of image, as a str
+    :param latent_method: A key in the HDF5 file that represents the latent method used to build the latent space, as a str
+    :param figure_height: height of the figure containing the plots, as an int
+    :param figure_width: width of the figure containing the plots, as an int
+    :param scatter_plot_x_axis_label_text_font_size: Font size of the x axis label for the scatter plot, as a str
+    :param scatter_plot_y_axis_label_text_font_size: Font size of the y axis label for the scatter plot, as a str
+    :param scatter_plot_color_bar_height: height of the color bar, as an int
+    :param scatter_plot_color_bar_width: width of the color bar, as an int
+    :param image_plot_image_size_scale_factor: scale the image size according to a fraction of the figure size, as a float
+    :param image_plot_image_brightness: Brightness of the image displayed in the image plot, as a float
+    :param image_plot_image_source_location: An alias for the determining where to display images from, as a str
+    :param image_plot_slac_username: A valid SLAC username, as a str
+    :param image_plot_slac_dataset_name: The name of the dataset in SLAC Compute Cluster, as a str
+    :param image_plot_index_label_text_font_size: Font size of the label for the index below the image plot, as a float
+    """
+    
+    # Load metadata from the HDF5 file
+    with h5.File(dataset_file, "r") as dataset_file_handle:        
+        if scatter_plot_type == "hexbin_colored_by_single_hit_flag" or scatter_plot_type == "colored_by_single_hit_flag":
+            # Load the single-hit mask from the HDF5 file
+            single_hit_mask_key = "single_hits_mask"
+            single_hit_mask = dataset_file_handle[single_hit_mask_key][:].astype(np.bool)
+        
+        elif scatter_plot_type == "colored_by_training_mask":
+            # Load the training set mask from the HDF5 file
+            training_set_mask_key = "training_set_mask"
+            training_set_mask = dataset_file_handle[training_set_mask_key][:].astype(np.bool)
+
+        # unclear on how to plot targets
+        # labels = np.zeros(len(images))
+   
+    # Load latent space from the HDF5 file
+    tic = time.time()
+    with h5.File(latent_space_file, "r") as latent_space_file_handle: 
+        latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key = "latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far"
+        latent_variable_1 = latent_space_file_handle[latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key][:, latent_idx_1 - 1]
+        latent_variable_2 = latent_space_file_handle[latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key][:, latent_idx_2 - 1] 
+#         print(latent_variable_1)
+#         print(latent_variable_2)
+#         print(latent_variable_1.shape)
+#         print(latent_variable_2.shape)
+#         latent_variable_1 = np.random.rand(200,)
+#         latent_variable_2 = np.random.rand(200,)
+        
+    toc = time.time()
+    print("It takes {:.2f} seconds to load the {} latent vectors and metadata from the HDF5 file.".format(toc-tic, len(latent_variable_1)))
+    
+    # unclear on how to plot targets
+    # n_labels = len(np.unique(labels))
+    
+    if scatter_plot_type == "hexbin":
+        # Scatter plot for the latent vectors
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+#         scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
+
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, color='white', size=0.1)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+    
+    elif scatter_plot_type == "colored_by_single_hit_flag":
+        #
+        single_hit_idx = np.where(single_hit_mask == True)[0]
+        outlier_idx = np.where(single_hit_mask == False)[0]
+        
+        #
+        single_hit_labels = np.empty((len(latent_variable_1),), dtype=np.int)
+        single_hit_labels[single_hit_idx] = 0
+        single_hit_labels[outlier_idx] = 1
+        
+        # Scatter plot for the latent vectors
+#         scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        
+        # Color the points in the scatter plot according to the single-hit mask
+        scatter_plot_colors = get_colors_from_discrete_values(single_hit_labels, [bokeh.palettes.Set1[3][1], bokeh.palettes.Set1[3][0]])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[single_hit_idx] = "Single-hit"
+        data_point_type[outlier_idx] = "Outlier"
+
+        # Data source for the scatter plot
+#         scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+        
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Hexbin the scatter plot
+#         scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None, legend_field="data_point_type", size=3.0)
+        
+#         scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+#         scatter_plot.add_tools(HoverTool(
+#             tooltips=[("count", "@c")],
+#             mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+#         ))
+    
+    elif scatter_plot_type == "hexbin_colored_by_single_hit_flag":
+        # Scatter plot for the latent vectors
+#         scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        
+        # Color the points in the scatter plot according to the single-hit mask
+        scatter_plot_colors = get_colors_from_discrete_values(single_hit_mask, bokeh.palettes.Set1[3][:2])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[single_hit_mask] = "Single-hit"
+        data_point_type[np.invert(single_hit_mask)] = "Outlier"
+
+        # Data source for the scatter plot
+#         scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+        
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        #scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None,  size=0.5)
+        
+#         scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+    
+    elif scatter_plot_type == "colored_by_training_mask":
+        # Scatter plot for the latent vectors
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset", background_fill_color="#440154")
+        
+        # Color the points in the scatter plot according to the training set mask    
+        scatter_plot_colors = get_colors_from_discrete_values(training_set_mask, bokeh.palettes.Set1[3][:2])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[training_set_mask] = "Train"
+        data_point_type[np.invert(training_set_mask)] = "Test"
+
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Populate the scatter plot
+        # Adapted from: https://stackoverflow.com/questions/50083062/how-to-add-legend-inside-pythons-bokeh-circle-plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None)
+    
+    else:
+        # Scatter plot for the latent vectors
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2))
+        
+        # Populate the scatter plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', source=scatter_plot_data_source, fill_alpha=0.6, line_color=None)        
+
+    # Add axis labels
+    scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+    scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
+    
+    # Change the axis label font size
+    scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
+    scatter_plot.yaxis.axis_label_text_font_size = scatter_plot_y_axis_label_text_font_size
+
+    # Container to display the static_images
+    div_width = int(figure_width * image_plot_image_size_scale_factor)
+    div_height = int(figure_height * image_plot_image_size_scale_factor)
+    image_plot_div = Div(width=div_width, height=div_height)
+
+    # Build the layout for plots
+    layout = row(scatter_plot, image_plot_div)
+
+    # Display the corresponding image when mouse is near a point in scatter plot
+    display_image_plot_fn = display_image_plot_using_image_source_location(image_plot_image_source_location, 
+                                                        image_plot_div, 
+                                                        latent_variable_1, 
+                                                        latent_variable_2, 
+                                                        image_plot_image_brightness, 
+                                                        image_plot_index_label_text_font_size, 
+                                                        image_plot_slac_username=image_plot_slac_username, 
+                                                        image_plot_slac_dataset_name=image_plot_slac_dataset_name, 
+                                                        dataset_file=dataset_file, 
+                                                        image_type=image_type)
+    scatter_plot.js_on_event(events.MouseMove, display_image_plot_fn)
+
+    # Display the plots
+    tic = time.time()
+    show(layout)
+    toc = time.time()
+    print("It takes {:.2f} seconds to display the plots.".format(toc-tic))
+
+def visualize_latent_space_for_incremental_principal_component_analysis_predicted_by_elliptic_envelope_outlier_prediction(
+    dataset_file,
+    latent_space_file,
+    outlier_prediction_mask_file,
+    image_type, 
+    latent_idx_1=0, 
+    latent_idx_2=1,
+    figure_height = 450, 
+    figure_width = 450, 
+    scatter_plot_x_axis_label_text_font_size='15pt',
+    scatter_plot_y_axis_label_text_font_size='15pt', 
+    scatter_plot_color_bar_height = 400,
+    scatter_plot_color_bar_width = 120,
+    scatter_plot_type = "hexbin",
+    image_plot_image_size_scale_factor = 0.9,
+    image_plot_image_brightness=1.0,
+    image_plot_image_source_location=None, 
+    image_plot_slac_username=None,
+    image_plot_slac_dataset_name=None,
+    image_plot_index_label_text_font_size='20px'
+    ):
+    
+    """
+    Visualize the latent space from an HDF5 file
+    
+    :param dataset_file: The path to the HDF5 file, as a str
+    :param latent_space_file: The path to the HDF5 file containing the latent space built by incremental_principal_component_analysis, as a str
+    :param outlier_prediction_mask_file: The path to the HDF5 file containing the outlier prediction mask obtained from elliptic_envelope, as a str
+    :param image_type: A key in the HDF5 file that represents the type of image, as a str
+    :param latent_method: A key in the HDF5 file that represents the latent method used to build the latent space, as a str
+    :param figure_height: height of the figure containing the plots, as an int
+    :param figure_width: width of the figure containing the plots, as an int
+    :param scatter_plot_x_axis_label_text_font_size: Font size of the x axis label for the scatter plot, as a str
+    :param scatter_plot_y_axis_label_text_font_size: Font size of the y axis label for the scatter plot, as a str
+    :param scatter_plot_color_bar_height: height of the color bar, as an int
+    :param scatter_plot_color_bar_width: width of the color bar, as an int
+    :param image_plot_image_size_scale_factor: scale the image size according to a fraction of the figure size, as a float
+    :param image_plot_image_brightness: Brightness of the image displayed in the image plot, as a float
+    :param image_plot_image_source_location: An alias for the determining where to display images from, as a str
+    :param image_plot_slac_username: A valid SLAC username, as a str
+    :param image_plot_slac_dataset_name: The name of the dataset in SLAC Compute Cluster, as a str
+    :param image_plot_index_label_text_font_size: Font size of the label for the index below the image plot, as a float
+    """
+        
+    # Load the single-hit mask from the HDF5 file
+    with h5.File(dataset_file, "r") as dataset_file_handle:        
+        if scatter_plot_type == "colored_by_outlier_prediction_label" or scatter_plot_type == "hexbin_colored_by_outlier_prediction_label":
+            # Load the single-hit mask from the HDF5 file
+            single_hit_mask_key = "single_hits_mask"
+            single_hit_mask = dataset_file_handle[single_hit_mask_key][:].astype(np.bool)
+   
+    # Load latent space from the HDF5 file
+    tic = time.time()
+    with h5.File(latent_space_file, "r") as latent_space_file_handle: 
+        latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key = "latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far"
+        latent_variable_1 = latent_space_file_handle[latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key][:, latent_idx_1 - 1]
+        latent_variable_2 = latent_space_file_handle[latent_space_projection_for_downsampled_diffraction_patterns_seen_thus_far_h5_key][:, latent_idx_2 - 1] 
+        
+    toc = time.time()
+    print("It takes {:.2f} seconds to load the {} latent vectors and metadata from the HDF5 file.".format(toc-tic, len(latent_variable_1)))
+    
+    # Load the outlier prediction mask from the HDF5 file
+    with h5.File(outlier_prediction_mask_file, "r") as outlier_prediction_mask_file_handle: 
+        elliptic_envelope_outlier_prediction_mask_for_downsampled_diffraction_patterns_seen_thus_far_h5_key = "elliptic_envelope_outlier_prediction_mask_for_downsampled_diffraction_patterns_seen_thus_far"
+        outlier_prediction_mask = outlier_prediction_mask_file_handle[elliptic_envelope_outlier_prediction_mask_for_downsampled_diffraction_patterns_seen_thus_far_h5_key][:]
+    
+    if scatter_plot_type == "colored_by_outlier_prediction_label":
+        
+        # Prepare the outlier prediction labels for the scatter plot colors and legend labels
+        true_positive_mask = np.bitwise_and(single_hit_mask, outlier_prediction_mask)
+        false_positive_mask = np.bitwise_and(np.bitwise_not(single_hit_mask), outlier_prediction_mask)
+        true_negative_mask = np.bitwise_and(np.bitwise_not(single_hit_mask), np.bitwise_not(outlier_prediction_mask))
+        false_negative_mask = np.bitwise_and(single_hit_mask, np.bitwise_not(outlier_prediction_mask))
+        
+        true_positive_idx = np.where(true_positive_mask == True)[0]
+        false_positive_idx = np.where(false_positive_mask == True)[0]
+        true_negative_idx = np.where(true_negative_mask == True)[0]
+        false_negative_idx = np.where(false_negative_mask == True)[0]
+        
+        # Scatter plot for the latent vectors
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        
+        # Color the points in the scatter plot according to the single-hit mask
+        outlier_prediction_labels = np.empty((len(latent_variable_1),), dtype=np.int)
+        outlier_prediction_labels[true_positive_idx] = 0
+        outlier_prediction_labels[false_positive_idx] = 1
+        outlier_prediction_labels[true_negative_idx] = 2
+        outlier_prediction_labels[false_negative_idx] = 3
+        
+        scatter_plot_colors = get_colors_from_discrete_values(outlier_prediction_labels, bokeh.palettes.Set1[4])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[true_positive_idx] = "True positive"        
+        data_point_type[false_positive_idx] = "False positive"
+        data_point_type[true_negative_idx] = "True negative"
+        data_point_type[false_negative_idx] = "False negative"
+
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Populate the scatter plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None,  size=0.1)
+    
+    elif scatter_plot_type == "hexbin_colored_by_outlier_prediction_label":
+        
+        # Prepare the outlier prediction labels for the scatter plot colors and legend labels
+        true_positive_mask = np.bitwise_and(single_hit_mask, outlier_prediction_mask)
+        false_positive_mask = np.bitwise_and(np.bitwise_not(single_hit_mask), outlier_prediction_mask)
+        true_negative_mask = np.bitwise_and(np.bitwise_not(single_hit_mask), np.bitwise_not(outlier_prediction_mask))
+        false_negative_mask = np.bitwise_and(single_hit_mask, np.bitwise_not(outlier_prediction_mask))
+        
+        true_positive_idx = np.where(true_positive_mask == True)[0]
+        false_positive_idx = np.where(false_positive_mask == True)[0]
+        true_negative_idx = np.where(true_negative_mask == True)[0]
+        false_negative_idx = np.where(false_negative_mask == True)[0]
+        
+        # Scatter plot for the latent vectors
+        scatter_plot = figure(match_aspect=True, width=figure_width, height=figure_height, tools="pan,wheel_zoom,box_zoom,reset")
+        
+        # Color the points in the scatter plot according to the single-hit mask
+        outlier_prediction_labels = np.empty((len(latent_variable_1),), dtype=np.int)
+        outlier_prediction_labels[true_positive_idx] = 0
+        outlier_prediction_labels[false_positive_idx] = 1
+        outlier_prediction_labels[true_negative_idx] = 2
+        outlier_prediction_labels[false_negative_idx] = 3
+        
+        scatter_plot_colors = get_colors_from_discrete_values(outlier_prediction_labels, bokeh.palettes.Set1[4])
+
+        # Define the legend 
+        data_point_type = np.empty((len(latent_variable_1),), dtype=np.object)
+        data_point_type[true_positive_idx] = "True positive"        
+        data_point_type[false_positive_idx] = "False positive"
+        data_point_type[true_negative_idx] = "True negative"
+        data_point_type[false_negative_idx] = "False negative"
+
+        # Make scatter plot grid invisible
+        scatter_plot.grid.visible = False
+        
+        # Data source for the scatter plot
+        scatter_plot_data_source = ColumnDataSource(data=dict(latent_variable_1=latent_variable_1, latent_variable_2=latent_variable_2, data_point_type=data_point_type, scatter_plot_colors=scatter_plot_colors))
+
+        # Hexbin the scatter plot
+        scatter_plot_hexbin_renderer, scatter_plot_hexbin_bins = scatter_plot.hexbin(latent_variable_1, latent_variable_2, size=0.5, hover_color="pink", hover_alpha=0.8)
+
+        # Populate the scatter plot
+        scatter_plot.circle('latent_variable_1', 'latent_variable_2', fill_color='scatter_plot_colors', source=scatter_plot_data_source, fill_alpha=0.6, legend_field="data_point_type", line_color=None,  size=0.1)
+        
+        # Display data point count for each hex tile in the hexbin scatter plot
+        scatter_plot.add_tools(HoverTool(
+            tooltips=[("count", "@c")],
+            mode="mouse", point_policy="follow_mouse", renderers=[scatter_plot_hexbin_renderer]
+        ))
+
+    # Add axis labels
+    scatter_plot.xaxis.axis_label = "PC {}".format(latent_idx_1)
+    scatter_plot.yaxis.axis_label = "PC {}".format(latent_idx_2)
     
     # Change the axis label font size
     scatter_plot.xaxis.axis_label_text_font_size = scatter_plot_x_axis_label_text_font_size
